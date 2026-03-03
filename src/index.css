@@ -1,0 +1,44 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
+@import "tailwindcss";
+
+@theme {
+  --color-navy: #1B2A4A;
+  --color-slate-dark: #0F172A;
+  --color-gold: #C5963A;
+  --color-teal: #3B9CB5;
+  --color-off-white: #F8FAFC;
+  --font-family-sans: 'Inter', system-ui, sans-serif;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Inter', system-ui, sans-serif;
+  background-color: #0F172A;
+  color: #F8FAFC;
+  margin: 0;
+  padding: 0;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: #1B2A4A; }
+::-webkit-scrollbar-thumb { background: #C5963A; border-radius: 0; }
+::-webkit-scrollbar-thumb:hover { background: #d4a84a; }
+
+.mapboxgl-popup-content {
+  background: #1B2A4A !important;
+  color: #F8FAFC !important;
+  border: 1px solid #C5963A !important;
+  border-radius: 0 !important;
+  padding: 12px !important;
+  font-family: 'Inter', sans-serif !important;
+  font-size: 12px !important;
+  box-shadow: 0 4px 20px rgba(0,0,0,0.5) !important;
+}
+.mapboxgl-popup-tip {
+  border-top-color: #1B2A4A !important;
+  border-bottom-color: #1B2A4A !important;
+}
+.mapboxgl-ctrl-attrib { display: none !important; }
