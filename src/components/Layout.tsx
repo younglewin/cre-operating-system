@@ -15,6 +15,8 @@ import {
   Briefcase,
   Inbox,
   Target,
+  FileUp,
+  Webhook,
 } from 'lucide-react'
 
 const PHASE1_NAV = [
@@ -37,6 +39,8 @@ const PHASE3_NAV = [
   { path: '/deals',        label: 'Deal Pipeline',  icon: Briefcase },
   { path: '/inbox',        label: 'Unified Inbox',  icon: Inbox },
   { path: '/buyer-match',  label: 'Buyer Match',    icon: Target },
+  { path: '/comp-ingest',  label: 'Comp Ingestion', icon: FileUp },
+  { path: '/webhook',      label: 'Zapier Webhook', icon: Webhook },
 ]
 
 const ALL_NAV = [...PHASE1_NAV, ...PHASE2_NAV, ...PHASE3_NAV]

@@ -15,6 +15,8 @@ import ContactsPage from './pages/ContactsPage'
 import DealsPage from './pages/DealsPage'
 import InboxPage from './pages/InboxPage'
 import BuyerMatchPage from './pages/BuyerMatchPage'
+import CompIngestionPage from './pages/CompIngestionPage'
+import WebhookPage from './pages/WebhookPage'
 
 export default function App() {
   return (
@@ -38,6 +40,8 @@ export default function App() {
           <Route path="deals"        element={<DealsPage />} />
           <Route path="inbox"        element={<InboxPage />} />
           <Route path="buyer-match"  element={<BuyerMatchPage />} />
+          <Route path="comp-ingest"  element={<CompIngestionPage />} />
+          <Route path="webhook"      element={<WebhookPage />} />
         </Route>
       </Routes>
     </HashRouter>
