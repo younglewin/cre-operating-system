@@ -2,7 +2,8 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
-export default defineConfig({
+export default defineConfig(({ command }) => ({
+  base: command === 'build' ? '/cre-operating-system/' : '/',
   plugins: [
     react(),
     tailwindcss(),
@@ -10,7 +11,6 @@ export default defineConfig({
   server: {
     host: '0.0.0.0',
     port: 5173,
-    // Allow all hosts for proxied preview environments
     allowedHosts: true,
   },
-})
+}))
