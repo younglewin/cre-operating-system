@@ -59,16 +59,18 @@ export default function DashboardPage() {
             </div>
           </div>
         </div>
-        <div className="grid grid-cols-4 gap-4 mt-4 pt-4" style={{ borderTop: '1px solid rgba(197,150,58,0.15)' }}>
+        <div className="grid grid-cols-6 gap-4 mt-4 pt-4" style={{ borderTop: '1px solid rgba(197,150,58,0.15)' }}>
           {[
-            { label: 'Cap Rate', value: formatCapRate(SUBJECT_PROPERTY.cap_rate) },
-            { label: 'GRM', value: formatGRM(SUBJECT_PROPERTY.grm) },
-            { label: '$/Unit', value: formatPrice(SUBJECT_PROPERTY.price_per_unit) },
-            { label: '$/SF', value: formatPrice(SUBJECT_PROPERTY.price_per_sf) },
-          ].map(({ label, value }) => (
+            { label: 'Asking Price', value: formatPrice(SUBJECT_PROPERTY.price), highlight: '#C5963A' },
+            { label: 'Cap Rate', value: formatCapRate(SUBJECT_PROPERTY.cap_rate), highlight: '#C5963A' },
+            { label: 'Total Units', value: String(SUBJECT_PROPERTY.num_units ?? '—'), highlight: '#F8FAFC' },
+            { label: 'GRM', value: formatGRM(SUBJECT_PROPERTY.grm), highlight: '#F8FAFC' },
+            { label: 'Price / Unit', value: formatPrice(SUBJECT_PROPERTY.price_per_unit), highlight: '#F8FAFC' },
+            { label: 'Price / SF', value: formatPrice(SUBJECT_PROPERTY.price_per_sf), highlight: '#F8FAFC' },
+          ].map(({ label, value, highlight }) => (
             <div key={label}>
               <div className="text-xs" style={{ color: 'rgba(248,250,252,0.4)' }}>{label}</div>
-              <div className="text-sm font-600 mt-0.5" style={{ color: '#F8FAFC' }}>{value}</div>
+              <div className="text-sm font-700 mt-0.5" style={{ color: highlight }}>{value}</div>
             </div>
           ))}
         </div>

@@ -7,6 +7,8 @@ import {
   Loader2,
 } from 'lucide-react'
 import { SUBJECT_PROPERTY } from '../lib/mockData'
+import AudienceSelector from '../components/AudienceSelector'
+import type { Contact } from '../types'
 
 const GOLD  = '#C5963A'
 const TEAL  = '#3B9CB5'
@@ -290,6 +292,8 @@ interface PostcardData {
   units: string
   yearBuilt: string
   pricePerUnit: string
+  pricePerSf: string
+  grm: string
   noi: string
   brokerName: string
   brokerPhone: string
@@ -339,8 +343,16 @@ function PostcardPDF({ data }: { data: PostcardData }) {
               <Text style={pdfStyles.frontMetricValue}>{data.units}</Text>
             </View>
             <View style={pdfStyles.frontMetricBox}>
-              <Text style={pdfStyles.frontMetricLabel}>YEAR BUILT</Text>
-              <Text style={pdfStyles.frontMetricValue}>{data.yearBuilt}</Text>
+              <Text style={pdfStyles.frontMetricLabel}>GRM</Text>
+              <Text style={pdfStyles.frontMetricValue}>{data.grm}</Text>
+            </View>
+            <View style={pdfStyles.frontMetricBox}>
+              <Text style={pdfStyles.frontMetricLabel}>PRICE / UNIT</Text>
+              <Text style={pdfStyles.frontMetricValue}>{data.pricePerUnit}</Text>
+            </View>
+            <View style={pdfStyles.frontMetricBox}>
+              <Text style={pdfStyles.frontMetricLabel}>PRICE / SF</Text>
+              <Text style={pdfStyles.frontMetricValue}>{data.pricePerSf}</Text>
             </View>
           </View>
 
@@ -450,6 +462,8 @@ export default function PostcardPage() {
     units:        String(SUBJECT_PROPERTY.num_units),
     yearBuilt:    String(SUBJECT_PROPERTY.year_built ?? 'N/A'),
     pricePerUnit: `$${(SUBJECT_PROPERTY.price_per_unit ?? 0).toLocaleString()}`,
+    pricePerSf:   `$${(SUBJECT_PROPERTY.price_per_sf ?? 0).toLocaleString()}`,
+    grm:          `${SUBJECT_PROPERTY.grm?.toFixed(2) ?? 'N/A'}`,
     noi:          `$${((SUBJECT_PROPERTY as unknown as Record<string, number>).noi ?? 0).toLocaleString()}`,
     brokerName:   'Shane Young & Dan Lewin',
     brokerPhone:  '(310) 555-0100',
@@ -550,6 +564,8 @@ export default function PostcardPage() {
                 { key: 'units',        label: 'Total Units' },
                 { key: 'yearBuilt',    label: 'Year Built' },
                 { key: 'pricePerUnit', label: 'Price / Unit' },
+                { key: 'pricePerSf',   label: 'Price / SF' },
+                { key: 'grm',          label: 'GRM' },
                 { key: 'noi',          label: 'NOI' },
                 { key: 'brokerName',   label: 'Broker Name(s)' },
                 { key: 'brokerPhone',  label: 'Phone' },
@@ -596,6 +612,31 @@ export default function PostcardPage() {
           {/* Mailing List Tab */}
           {activeTab === 'list' && (
             <div>
+              {/* Audience Selector */}
+              <AudienceSelector
+                mode="mail"
+                onSelectionChange={(contacts: Contact[]) => {
+                  // Merge CRM contacts into mailing list (deduplicate by email)
+                  const existing = new Set(mailingList.map(m => m.name))
+                  const newEntries = contacts
+                    .filter(c => !existing.has(`${c.first_name} ${c.last_name}`))
+                    .map(c => ({
+                      id: c.id,
+                      name: `${c.first_name} ${c.last_name}`,
+                      address: '',
+                      city: c.city ?? '',
+                      state: c.state ?? 'CA',
+                      zip: c.zip ?? '',
+                    }))
+                  if (newEntries.length > 0) {
+                    setMailingList(prev => [
+                      ...prev.filter(m => !contacts.some(c => `${c.first_name} ${c.last_name}` === m.name)),
+                      ...newEntries,
+                    ])
+                  }
+                }}
+                className="mb-4"
+              />
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 12 }}>
                 <div style={{ fontSize: 10, color: 'rgba(248,250,252,0.5)' }}>{mailingList.length} recipients</div>
                 <button onClick={addMailingEntry} style={{ display: 'flex', alignItems: 'center', gap: 4, padding: '5px 10px', fontSize: 10, fontWeight: 700, fontFamily: 'Inter', cursor: 'pointer', border: `1px solid ${GOLD}50`, backgroundColor: `${GOLD}12`, color: GOLD, textTransform: 'uppercase' }}>

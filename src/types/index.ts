@@ -14,6 +14,34 @@ export interface TeamMember {
   team_id: string
   user_id: string
   role: TeamRole
+  headshot_url?: string
+  phone?: string
+  email?: string
+  title?: string
+  license_number?: string
+  bio?: string
+}
+
+export interface Contact {
+  id: string
+  team_id: string
+  first_name: string
+  last_name: string
+  email?: string
+  phone?: string
+  company?: string
+  address?: string
+  city?: string
+  state?: string
+  zip?: string
+  unit_count_min?: number
+  unit_count_max?: number
+  tags: string[]
+  notes?: string
+  is_buyer: boolean
+  is_seller: boolean
+  is_active: boolean
+  created_at: string
 }
 
 export interface Property {
@@ -59,6 +87,32 @@ export interface Property {
   dscr?: number
   cash_on_cash?: number
   equity_invested?: number
+  // Phase 2 — Demographics & Market Overview
+  population?: number
+  median_age?: number
+  median_hh_income?: number
+  median_property_value?: number
+  renter_occupied_pct?: number
+  avg_commute_min?: number
+  market_description?: string
+  location_highlights?: string[]
+  investment_highlights?: string[]
+  property_amenities?: string[]
+  // Phase 2 — Expense detail
+  gross_sf?: number
+  lot_sf?: number
+  rent_increase_pct?: number
+  other_income?: number
+  vacancy_loss_pct?: number
+  management_fee_pct?: number
+  property_tax?: number
+  insurance?: number
+  repairs_maintenance?: number
+  utilities?: number
+  landscaping?: number
+  pest_control?: number
+  trash?: number
+  reserves?: number
   created_at: string
   updated_at: string
 }

@@ -16,6 +16,8 @@ import {
 } from 'lucide-react'
 import OpenAI from 'openai'
 import { SUBJECT_PROPERTY } from '../lib/mockData'
+import AudienceSelector from '../components/AudienceSelector'
+import type { Contact } from '../types'
 
 const GOLD  = '#C5963A'
 const TEAL  = '#3B9CB5'
@@ -54,7 +56,7 @@ const DEFAULT_BLOCKS: EmailBlock[] = [
   { id: 'eb2', type: 'hero_image',  content: { url: '', alt: 'Property photo', caption: '' } },
   { id: 'eb3', type: 'headline',    content: { text: `New Listing: ${SUBJECT_PROPERTY.name}` } },
   { id: 'eb4', type: 'body_text',   content: { text: `We are pleased to present an exclusive opportunity to acquire ${SUBJECT_PROPERTY.name}, a ${SUBJECT_PROPERTY.num_units}-unit multifamily asset located in the highly desirable Naples Island neighborhood of Long Beach, CA. Priced at $${(SUBJECT_PROPERTY.price ?? 0).toLocaleString()}, this offering represents a compelling ${SUBJECT_PROPERTY.cap_rate?.toFixed(2)}% cap rate in one of Southern California's most sought-after coastal submarkets.` } },
-  { id: 'eb5', type: 'metrics_row', content: { m1_label: 'Asking Price', m1_value: `$${(SUBJECT_PROPERTY.price ?? 0).toLocaleString()}`, m2_label: 'Cap Rate', m2_value: `${SUBJECT_PROPERTY.cap_rate?.toFixed(2)}%`, m3_label: 'Total Units', m3_value: String(SUBJECT_PROPERTY.num_units), m4_label: 'Year Built', m4_value: String(SUBJECT_PROPERTY.year_built ?? 'N/A') } },
+  { id: 'eb5', type: 'metrics_row', content: { m1_label: 'Asking Price', m1_value: `$${(SUBJECT_PROPERTY.price ?? 0).toLocaleString()}`, m2_label: 'Cap Rate', m2_value: `${SUBJECT_PROPERTY.cap_rate?.toFixed(2)}%`, m3_label: 'Total Units', m3_value: String(SUBJECT_PROPERTY.num_units), m4_label: 'GRM', m4_value: `${SUBJECT_PROPERTY.grm?.toFixed(2) ?? 'N/A'}`, m5_label: 'Price / Unit', m5_value: `$${(SUBJECT_PROPERTY.price_per_unit ?? 0).toLocaleString()}`, m6_label: 'Price / SF', m6_value: `$${(SUBJECT_PROPERTY.price_per_sf ?? 0).toLocaleString()}` } },
   { id: 'eb6', type: 'cta_button',  content: { text: 'Request the Offering Memorandum', url: '#', subtext: 'Sign the digital NDA to receive the full OM instantly.' } },
   { id: 'eb7', type: 'divider',     content: {} },
   { id: 'eb8', type: 'footer',      content: { name: 'Shane Young & Dan Lewin', title: 'YoungLewin Advisors', phone: '(310) 555-0100', email: 'info@younglewi n.com', license: 'CA DRE #00000000', unsubscribe: 'Unsubscribe' } },
@@ -152,12 +154,14 @@ function EmailBlockPreview({ block }: { block: EmailBlock }) {
       )
     case 'metrics_row':
       return (
-        <div style={{ padding: '16px 24px', display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 8 }}>
-          {[1, 2, 3, 4].map(n => (
-            <div key={n} style={{ padding: '10px 12px', backgroundColor: `${NAVY}80`, border: '1px solid rgba(197,150,58,0.15)', textAlign: 'center' }}>
-              <div style={{ fontSize: 8, color: 'rgba(148,163,184,0.8)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{c[`m${n}_label`]}</div>
-              <div style={{ fontSize: 15, fontWeight: 800, color: n <= 2 ? GOLD : OFF }}>{c[`m${n}_value`]}</div>
-            </div>
+        <div style={{ padding: '16px 24px', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: 8 }}>
+          {[1, 2, 3, 4, 5, 6].map(n => (
+            c[`m${n}_label`] ? (
+              <div key={n} style={{ padding: '10px 12px', backgroundColor: `${NAVY}80`, border: '1px solid rgba(197,150,58,0.15)', textAlign: 'center' }}>
+                <div style={{ fontSize: 8, color: 'rgba(148,163,184,0.8)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: 4 }}>{c[`m${n}_label`]}</div>
+                <div style={{ fontSize: 14, fontWeight: 800, color: n <= 2 ? GOLD : OFF }}>{c[`m${n}_value`]}</div>
+              </div>
+            ) : null
           ))}
         </div>
       )
@@ -443,7 +447,7 @@ export default function EmailMarketingPage() {
       hero_image:  { url: '', alt: 'Property photo', caption: '' },
       headline:    { text: 'New Headline' },
       body_text:   { text: 'Enter your email body text here.' },
-      metrics_row: { m1_label: 'Metric 1', m1_value: 'Value', m2_label: 'Metric 2', m2_value: 'Value', m3_label: 'Metric 3', m3_value: 'Value', m4_label: 'Metric 4', m4_value: 'Value' },
+      metrics_row: { m1_label: 'Asking Price', m1_value: `$${(SUBJECT_PROPERTY.price ?? 0).toLocaleString()}`, m2_label: 'Cap Rate', m2_value: `${SUBJECT_PROPERTY.cap_rate?.toFixed(2)}%`, m3_label: 'Total Units', m3_value: String(SUBJECT_PROPERTY.num_units), m4_label: 'GRM', m4_value: `${SUBJECT_PROPERTY.grm?.toFixed(2) ?? 'N/A'}`, m5_label: 'Price / Unit', m5_value: `$${(SUBJECT_PROPERTY.price_per_unit ?? 0).toLocaleString()}`, m6_label: 'Price / SF', m6_value: `$${(SUBJECT_PROPERTY.price_per_sf ?? 0).toLocaleString()}` },
       cta_button:  { text: 'Learn More', url: '#', subtext: '' },
       divider:     {},
       footer:      { name: 'Shane Young & Dan Lewin', title: 'YoungLewin Advisors', phone: '(310) 555-0100', email: 'info@younglewi n.com', license: 'CA DRE #00000000', unsubscribe: 'Unsubscribe' },
@@ -530,6 +534,13 @@ export default function EmailMarketingPage() {
         <div style={{ flex: 1, overflowY: 'auto' }}>
           {activeTab === 'blocks' && (
             <div style={{ padding: 12 }}>
+              {/* Audience Selector */}
+              <AudienceSelector
+                mode="email"
+                onSelectionChange={(_contacts: Contact[]) => {
+                  // Recipients are tracked internally; contacts feed into campaign send
+                }}
+              />
               {/* Add block */}
               <div style={{ marginBottom: 12 }}>
                 <div style={{ fontSize: 8, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', color: 'rgba(248,250,252,0.3)', marginBottom: 6 }}>Add Block</div>

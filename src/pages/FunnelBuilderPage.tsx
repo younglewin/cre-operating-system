@@ -12,7 +12,7 @@ import { CSS } from '@dnd-kit/utilities'
 import {
   GripVertical, Trash2, Eye, EyeOff, Shield, Mail,
   CheckCircle, Copy, ExternalLink, Settings, Loader2,
-  Image, Type, List, Phone, Building2, Link2,
+  Image, Type, List, Phone, Building2, Link2, ToggleLeft, ToggleRight, UserCheck, Download,
 } from 'lucide-react'
 import { SUBJECT_PROPERTY } from '../lib/mockData'
 
@@ -163,6 +163,11 @@ function BlockPreview({ block }: { block: Block }) {
           <button style={{ padding: '12px 28px', backgroundColor: GOLD, color: SLATE, fontSize: 12, fontWeight: 800, border: 'none', cursor: 'pointer', fontFamily: 'Inter', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
             {c.button}
           </button>
+          {/* Gate mode indicator in preview */}
+          <div style={{ marginTop: 12, display: 'inline-flex', alignItems: 'center', gap: 5, padding: '4px 10px', fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.06em', border: '1px solid rgba(197,150,58,0.25)', color: 'rgba(248,250,252,0.4)' }}>
+            <Shield size={9} />
+            Gate Mode: NDA Required
+          </div>
         </div>
       )
     case 'contact':
@@ -310,10 +315,12 @@ export default function FunnelBuilderPage() {
     { id: 'b5', type: 'cta',      content: BLOCK_LIBRARY[4].defaultContent, visible: true },
     { id: 'b6', type: 'contact',  content: BLOCK_LIBRARY[6].defaultContent, visible: true },
   ])
-  const [activeTab, setActiveTab] = useState<'builder' | 'nda' | 'tracking'>('builder')
+  const [activeTab, setActiveTab] = useState<'builder' | 'nda' | 'tracking' | 'settings'>('builder')
   const [publishing, setPublishing] = useState(false)
   const [published, setPublished]   = useState(false)
   const [slug] = useState('naples-island-fourplex')
+  const [ndaRequired, setNdaRequired] = useState(true)
+  const [dataRoomLocked, setDataRoomLocked] = useState(true)
 
   const sensors = useSensors(
     useSensor(PointerSensor),
@@ -348,9 +355,10 @@ export default function FunnelBuilderPage() {
   }
 
   const tabs = [
-    { key: 'builder',  label: 'Page Builder', icon: <Settings size={12} /> },
-    { key: 'nda',      label: 'NDA Submissions', icon: <Shield size={12} /> },
-    { key: 'tracking', label: 'Read Tracking', icon: <Eye size={12} /> },
+    { key: 'builder',  label: 'Builder', icon: <Settings size={12} /> },
+    { key: 'settings', label: 'Gate', icon: <Shield size={12} /> },
+    { key: 'nda',      label: 'Leads', icon: <UserCheck size={12} /> },
+    { key: 'tracking', label: 'Tracking', icon: <Eye size={12} /> },
   ] as const
 
   return (
@@ -426,6 +434,94 @@ export default function FunnelBuilderPage() {
 
           {activeTab === 'nda' && <NDAPanel propertyId={SUBJECT_PROPERTY.id} />}
           {activeTab === 'tracking' && <TrackingPanel />}
+          {activeTab === 'settings' && (
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+              {/* NDA Gate Toggle */}
+              <div style={{ padding: '14px', border: `1px solid ${ndaRequired ? 'rgba(197,150,58,0.35)' : 'rgba(59,156,181,0.25)'}`, backgroundColor: 'rgba(15,23,42,0.5)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 10 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Shield size={13} style={{ color: ndaRequired ? GOLD : TEAL }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, color: OFF }}>NDA Required</span>
+                  </div>
+                  <button
+                    onClick={() => setNdaRequired(p => !p)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: ndaRequired ? GOLD : 'rgba(248,250,252,0.3)' }}
+                  >
+                    {ndaRequired ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
+                  </button>
+                </div>
+                <div style={{ fontSize: 10, color: 'rgba(248,250,252,0.5)', lineHeight: 1.6 }}>
+                  {ndaRequired
+                    ? <><span style={{ color: GOLD, fontWeight: 600 }}>ON — NDA Gate Active.</span> Buyers must digitally sign the Confidentiality Agreement before the OM is emailed or the Data Room is unlocked. All signatures are logged with timestamp and IP.
+                    </>
+                    : <><span style={{ color: TEAL, fontWeight: 600 }}>OFF — Open Access.</span> Buyers enter their name and email only. The OM downloads instantly. No signature required. Submissions are still logged as leads.
+                    </>}
+                </div>
+                {/* Visual flow diagram */}
+                <div style={{ marginTop: 12, padding: '10px 12px', backgroundColor: 'rgba(15,23,42,0.6)', border: '1px solid rgba(197,150,58,0.1)', fontSize: 9, color: 'rgba(248,250,252,0.5)', lineHeight: 2 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 6, height: 6, backgroundColor: TEAL }} />
+                    <span>Buyer visits page</span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12 }}>
+                    <div style={{ width: 1, height: 12, backgroundColor: 'rgba(248,250,252,0.15)', marginLeft: 2 }} />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 6, height: 6, backgroundColor: ndaRequired ? GOLD : TEAL }} />
+                    <span style={{ color: ndaRequired ? GOLD : TEAL, fontWeight: 600 }}>
+                      {ndaRequired ? 'Signs NDA (digital signature)' : 'Enters name + email only'}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6, paddingLeft: 12 }}>
+                    <div style={{ width: 1, height: 12, backgroundColor: 'rgba(248,250,252,0.15)', marginLeft: 2 }} />
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <div style={{ width: 6, height: 6, backgroundColor: '#22C55E' }} />
+                    <span style={{ color: '#22C55E' }}>OM emailed + Data Room unlocked</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* Data Room Lock Toggle */}
+              <div style={{ padding: '14px', border: '1px solid rgba(59,156,181,0.2)', backgroundColor: 'rgba(15,23,42,0.5)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                    <Download size={13} style={{ color: TEAL }} />
+                    <span style={{ fontSize: 11, fontWeight: 700, color: OFF }}>Data Room Lock</span>
+                  </div>
+                  <button
+                    onClick={() => setDataRoomLocked(p => !p)}
+                    style={{ background: 'none', border: 'none', cursor: 'pointer', display: 'flex', color: dataRoomLocked ? TEAL : 'rgba(248,250,252,0.3)' }}
+                  >
+                    {dataRoomLocked ? <ToggleRight size={24} /> : <ToggleLeft size={24} />}
+                  </button>
+                </div>
+                <div style={{ fontSize: 10, color: 'rgba(248,250,252,0.5)', lineHeight: 1.6 }}>
+                  {dataRoomLocked
+                    ? 'Data Room requires gate completion before documents are accessible.'
+                    : 'Data Room is publicly accessible without any gate.'}
+                </div>
+              </div>
+
+              {/* Status summary */}
+              <div style={{ padding: '12px 14px', backgroundColor: 'rgba(27,42,74,0.5)', border: '1px solid rgba(197,150,58,0.15)' }}>
+                <div style={{ fontSize: 9, fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.08em', color: 'rgba(248,250,252,0.35)', marginBottom: 8 }}>Current Gate Configuration</div>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                  {[
+                    { label: 'NDA Signature', value: ndaRequired ? 'Required' : 'Bypassed', active: ndaRequired },
+                    { label: 'Data Room', value: dataRoomLocked ? 'Locked' : 'Open', active: dataRoomLocked },
+                    { label: 'Lead Capture', value: 'Always On', active: true },
+                    { label: 'Read Tracking', value: 'Active', active: true },
+                  ].map(item => (
+                    <div key={item.label} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                      <span style={{ fontSize: 10, color: 'rgba(248,250,252,0.5)' }}>{item.label}</span>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: item.active ? '#22C55E' : 'rgba(248,250,252,0.3)' }}>{item.value}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Publish Footer */}
