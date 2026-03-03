@@ -1,4 +1,4 @@
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom'
+import { HashRouter, Routes, Route, Navigate } from 'react-router-dom'
 import Layout from './components/Layout'
 import CompsPage from './pages/CompsPage'
 import PricingPage from './pages/PricingPage'
@@ -13,7 +13,7 @@ import EmailMarketingPage from './pages/EmailMarketingPage'
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <HashRouter>
       <Routes>
         <Route path="/" element={<Layout />}>
           <Route index element={<Navigate to="/dashboard" replace />} />
@@ -30,6 +30,6 @@ export default function App() {
           <Route path="email"        element={<EmailMarketingPage />} />
         </Route>
       </Routes>
-    </BrowserRouter>
+    </HashRouter>
   )
 }
