@@ -2,7 +2,7 @@ import { useState, useEffect, useRef } from 'react'
 import {
   Plus, X, DollarSign, Building2, User, Calendar, ChevronRight,
   TrendingUp, Target, Edit2, Trash2, RefreshCw, MoreHorizontal,
-  ArrowRight, CheckCircle, Clock, AlertCircle
+  ArrowRight, CheckCircle, Clock, AlertCircle, Search
 } from 'lucide-react'
 import { supabase } from '../lib/supabase'
 import type { Deal, DealStage, Contact, Property } from '../types'
@@ -143,6 +143,74 @@ function DealCard({ deal, onDragStart, onClick }: {
   )
 }
 
+// ─── Searchable Contact Picker ───────────────────────────────────────────────
+function ContactPicker({ contacts, value, onChange }: {
+  contacts: Contact[]; value: string; onChange: (id: string) => void
+}) {
+  const [query, setQuery] = useState('')
+  const [open, setOpen] = useState(false)
+  const ref = useRef<HTMLDivElement>(null)
+
+  const selected = contacts.find(c => c.id === value)
+  const filtered = query
+    ? contacts.filter(c => `${c.first_name} ${c.last_name} ${c.company ?? ''}`.toLowerCase().includes(query.toLowerCase()))
+    : contacts.slice(0, 12)
+
+  useEffect(() => {
+    const handler = (e: MouseEvent) => { if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false) }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  return (
+    <div ref={ref} className="relative">
+      <div
+        className="flex items-center gap-2 px-2 py-1.5 cursor-pointer"
+        style={{ backgroundColor: 'rgba(248,250,252,0.08)', color: selected ? '#F8FAFC' : 'rgba(248,250,252,0.35)' }}
+        onClick={() => setOpen(o => !o)}
+      >
+        <Search size={11} style={{ color: 'rgba(248,250,252,0.3)', flexShrink: 0 }} />
+        <span className="text-xs flex-1 truncate">
+          {selected ? `${selected.first_name} ${selected.last_name}${selected.company ? ` · ${selected.company}` : ''}` : '— Search contacts —'}
+        </span>
+        {value && <button onClick={e => { e.stopPropagation(); onChange(''); setQuery('') }} style={{ color: 'rgba(248,250,252,0.3)' }}><X size={10}/></button>}
+      </div>
+      {open && (
+        <div className="absolute top-full left-0 right-0 z-50 shadow-xl" style={{ backgroundColor: '#1B2A4A', border: '1px solid rgba(197,150,58,0.3)', maxHeight: '220px', overflowY: 'auto' }}>
+          <div className="p-1.5 border-b" style={{ borderColor: 'rgba(248,250,252,0.06)' }}>
+            <input
+              autoFocus
+              className="w-full px-2 py-1 text-xs"
+              style={{ backgroundColor: 'rgba(248,250,252,0.06)', color: '#F8FAFC', border: 'none', outline: 'none' }}
+              placeholder="Type to filter..."
+              value={query}
+              onChange={e => setQuery(e.target.value)}
+            />
+          </div>
+          {filtered.length === 0 && <div className="px-3 py-2 text-xs" style={{ color: 'rgba(248,250,252,0.3)' }}>No contacts found</div>}
+          {filtered.map(c => (
+            <button
+              key={c.id}
+              className="w-full flex items-center gap-2 px-3 py-2 text-left"
+              style={{ borderBottom: '1px solid rgba(248,250,252,0.04)', backgroundColor: c.id === value ? 'rgba(197,150,58,0.1)' : 'transparent' }}
+              onClick={() => { onChange(c.id); setOpen(false); setQuery('') }}
+            >
+              <div className="w-5 h-5 flex items-center justify-center text-xs font-bold flex-shrink-0" style={{ backgroundColor: 'rgba(197,150,58,0.2)', color: '#C5963A' }}>
+                {c.first_name?.[0]}{c.last_name?.[0]}
+              </div>
+              <div className="flex-1 min-w-0">
+                <div className="text-xs font-medium truncate" style={{ color: '#F8FAFC' }}>{c.first_name} {c.last_name}</div>
+                {c.company && <div className="text-xs truncate" style={{ color: 'rgba(248,250,252,0.4)' }}>{c.company}</div>}
+              </div>
+              {c.contact_type && <span className="text-xs px-1.5 py-0.5 flex-shrink-0" style={{ backgroundColor: 'rgba(248,250,252,0.06)', color: 'rgba(248,250,252,0.4)', fontSize: '9px' }}>{c.contact_type}</span>}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ─── Add Deal Modal ───────────────────────────────────────────────────────────
 function AddDealModal({ onClose, onAdd, contacts, properties }: {
   onClose: () => void
@@ -248,11 +316,7 @@ function AddDealModal({ onClose, onAdd, contacts, properties }: {
           <div className="flex gap-3">
             <div className="flex-1">
               <label className="block text-xs mb-1" style={{ color: 'rgba(248,250,252,0.4)', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Contact</label>
-              <select className="w-full px-2 py-1.5 text-xs border-none outline-none" style={{ backgroundColor: 'rgba(248,250,252,0.08)', color: '#F8FAFC' }}
-                value={form.contact_id} onChange={e => setForm(f => ({ ...f, contact_id: e.target.value }))}>
-                <option value="">— Select Contact —</option>
-                {contacts.map(c => <option key={c.id} value={c.id}>{c.first_name} {c.last_name}</option>)}
-              </select>
+              <ContactPicker contacts={contacts} value={form.contact_id} onChange={id => setForm(f => ({ ...f, contact_id: id }))}/>
             </div>
             <div className="flex-1">
               <label className="block text-xs mb-1" style={{ color: 'rgba(248,250,252,0.4)', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Property</label>

@@ -22,11 +22,96 @@ body {
   padding: 0;
 }
 
+/* ─── Global Scrollbar ──────────────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 6px; height: 6px; }
 ::-webkit-scrollbar-track { background: #1B2A4A; }
 ::-webkit-scrollbar-thumb { background: #C5963A; border-radius: 0; }
 ::-webkit-scrollbar-thumb:hover { background: #d4a84a; }
 
+/* ─── GLOBAL FIX: Dropdown / Select legibility ──────────────────────────────── */
+/* Native <select> elements: force dark background + light text everywhere       */
+select {
+  background-color: #1B2A4A !important;
+  color: #F8FAFC !important;
+  border: 1px solid rgba(248, 250, 252, 0.12) !important;
+  cursor: pointer;
+}
+
+/* The <option> elements inside any select */
+select option {
+  background-color: #1B2A4A !important;
+  color: #F8FAFC !important;
+}
+
+/* Focused select */
+select:focus {
+  outline: none !important;
+  border-color: rgba(197, 150, 58, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(197, 150, 58, 0.15) !important;
+}
+
+/* ─── GLOBAL FIX: Cursor pointer on all interactive elements ────────────────── */
+button,
+[role="button"],
+a,
+select,
+label[for],
+input[type="checkbox"],
+input[type="radio"],
+input[type="file"],
+summary,
+[tabindex]:not([tabindex="-1"]) {
+  cursor: pointer;
+}
+
+/* ─── GLOBAL FIX: Input fields ──────────────────────────────────────────────── */
+input,
+textarea {
+  background-color: rgba(27, 42, 74, 0.8);
+  color: #F8FAFC;
+  border: 1px solid rgba(248, 250, 252, 0.1);
+  outline: none;
+  transition: border-color 0.15s ease;
+}
+
+input:focus,
+textarea:focus {
+  border-color: rgba(197, 150, 58, 0.5) !important;
+  box-shadow: 0 0 0 2px rgba(197, 150, 58, 0.12) !important;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: rgba(248, 250, 252, 0.3);
+}
+
+/* ─── GLOBAL FIX: Button hover states ──────────────────────────────────────── */
+button {
+  transition: opacity 0.15s ease, background-color 0.15s ease, transform 0.1s ease;
+}
+
+button:hover:not(:disabled) {
+  opacity: 0.88;
+}
+
+button:active:not(:disabled) {
+  transform: scale(0.98);
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+/* ─── GLOBAL FIX: Table row hover ──────────────────────────────────────────── */
+tr[onClick],
+tr.clickable,
+[data-clickable="true"] {
+  cursor: pointer;
+  transition: background-color 0.12s ease;
+}
+
+/* ─── Mapbox popup styles ───────────────────────────────────────────────────── */
 .mapboxgl-popup-content {
   background: #1B2A4A !important;
   color: #F8FAFC !important;
