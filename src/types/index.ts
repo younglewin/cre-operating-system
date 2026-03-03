@@ -40,6 +40,25 @@ export interface Property {
   is_om: boolean
   is_sale_comp: boolean
   is_rent_comp: boolean
+  // V1.1 — Photo & unit data
+  unit_mix?: string
+  unit_sf?: number
+  photo_url?: string
+  // V1.2 — Debt model
+  apn?: string
+  noi?: number
+  gross_scheduled_income?: number
+  vacancy_rate?: number
+  operating_expenses?: number
+  ltv?: number
+  interest_rate?: number
+  amortization_yrs?: number
+  io_period_yrs?: number
+  loan_amount?: number
+  annual_debt_service?: number
+  dscr?: number
+  cash_on_cash?: number
+  equity_invested?: number
   created_at: string
   updated_at: string
 }
@@ -83,6 +102,8 @@ export interface CompFeedItem {
   unit_mix?: string        // e.g. "2x 2BD/1BA, 2x 1BD/1BA" — sale comps
   unit_sf?: number          // avg unit square footage — rent comps
   photo_url?: string        // Supabase Storage public URL
+  monthly_rent?: number     // rent comps
+  unit_type?: string        // rent comps unit type label
   // Computed client-side
   distance_miles?: number
 }
