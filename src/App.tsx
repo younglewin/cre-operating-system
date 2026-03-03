@@ -10,6 +10,11 @@ import OMGeneratorPage from './pages/OMGeneratorPage'
 import FunnelBuilderPage from './pages/FunnelBuilderPage'
 import PostcardPage from './pages/PostcardPage'
 import EmailMarketingPage from './pages/EmailMarketingPage'
+// Phase 3 — CRM & Pipeline
+import ContactsPage from './pages/ContactsPage'
+import DealsPage from './pages/DealsPage'
+import InboxPage from './pages/InboxPage'
+import BuyerMatchPage from './pages/BuyerMatchPage'
 
 export default function App() {
   return (
@@ -28,6 +33,11 @@ export default function App() {
           <Route path="funnel"       element={<FunnelBuilderPage />} />
           <Route path="postcards"    element={<PostcardPage />} />
           <Route path="email"        element={<EmailMarketingPage />} />
+          {/* Phase 3 */}
+          <Route path="contacts"     element={<ContactsPage />} />
+          <Route path="deals"        element={<DealsPage />} />
+          <Route path="inbox"        element={<InboxPage />} />
+          <Route path="buyer-match"  element={<BuyerMatchPage />} />
         </Route>
       </Routes>
     </HashRouter>

@@ -11,6 +11,10 @@ import {
   Funnel,
   Mail,
   Printer,
+  Users,
+  Briefcase,
+  Inbox,
+  Target,
 } from 'lucide-react'
 
 const PHASE1_NAV = [
@@ -28,7 +32,14 @@ const PHASE2_NAV = [
   { path: '/email',        label: 'Email Marketing',      icon: Mail },
 ]
 
-const ALL_NAV = [...PHASE1_NAV, ...PHASE2_NAV]
+const PHASE3_NAV = [
+  { path: '/contacts',     label: 'Contacts',       icon: Users },
+  { path: '/deals',        label: 'Deal Pipeline',  icon: Briefcase },
+  { path: '/inbox',        label: 'Unified Inbox',  icon: Inbox },
+  { path: '/buyer-match',  label: 'Buyer Match',    icon: Target },
+]
+
+const ALL_NAV = [...PHASE1_NAV, ...PHASE2_NAV, ...PHASE3_NAV]
 
 export default function Layout() {
   const location = useLocation()
@@ -94,14 +105,25 @@ export default function Layout() {
           <div className="px-3 pb-1" style={{ fontSize: '8px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(59,156,181,0.6)' }}>
             Marketing &amp; Funnels
           </div>
-          <div className="space-y-0.5">
+          <div className="space-y-0.5 mb-3">
             {PHASE2_NAV.map(item => <NavItem key={item.path} {...item} />)}
+          </div>
+
+          {/* Divider */}
+          <div style={{ height: 1, backgroundColor: 'rgba(59,156,181,0.12)', margin: '4px 8px 8px' }} />
+
+          {/* Phase 3 — CRM */}
+          <div className="px-3 pb-1" style={{ fontSize: '8px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.12em', color: 'rgba(168,85,247,0.6)' }}>
+            CRM &amp; Pipeline
+          </div>
+          <div className="space-y-0.5">
+            {PHASE3_NAV.map(item => <NavItem key={item.path} {...item} />)}
           </div>
         </nav>
 
         {/* Footer */}
         <div className="px-4 py-3 border-t text-xs" style={{ borderColor: 'rgba(197,150,58,0.2)', color: 'rgba(248,250,252,0.25)', fontSize: '9px' }}>
-          Phase 2 · V2.0 · Long Beach CA
+          Phase 3 · V3.0 · Long Beach CA
         </div>
       </aside>
 

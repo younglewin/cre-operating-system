@@ -1,8 +1,40 @@
 // CRE Operating System - Shared Types
-
 export type PropertyType = 'Multifamily' | 'Mixed-Use' | 'Commercial' | 'Land' | 'SFR' | 'Industrial'
 export type CompSource = 'property' | 'comparable'
 export type TeamRole = 'Admin' | 'Member'
+
+// ─── Phase 3 CRM Types ───────────────────────────────────────────────────────
+export type ContactType = 'Buyer' | 'Seller' | 'Investor' | 'Broker' | 'Lender' | 'Vendor' | 'Other'
+export type LeadStatus = 'New' | 'Contacted' | 'Qualified' | 'Active' | 'Under Contract' | 'Closed' | 'Dead'
+export type DealStage = 'Prospecting' | 'Outreach' | 'Meeting Scheduled' | 'LOI / Offer' | 'Under Contract' | 'Due Diligence' | 'Closed Won' | 'Closed Lost'
+export type CommChannel = 'email' | 'sms' | 'call' | 'note' | 'meeting'
+export type TaskPriority = 'Low' | 'Normal' | 'High' | 'Urgent'
+
+export interface PhoneEntry {
+  number: string
+  label: string
+  line_type?: string
+  is_valid: boolean
+  confidence_score?: number
+}
+
+export interface EmailEntry {
+  address: string
+  label: string
+  is_valid: boolean
+}
+
+export interface InvestmentCriteria {
+  asset_types?: string[]
+  min_price?: number
+  max_price?: number
+  min_units?: number
+  max_units?: number
+  target_zips?: string[]
+  target_cities?: string[]
+  cap_rate_min?: number
+  notes?: string
+}
 
 export interface Team {
   id: string
@@ -11,14 +43,17 @@ export interface Team {
 }
 
 export interface TeamMember {
+  id: string
   team_id: string
   user_id: string
   role: TeamRole
+  full_name?: string
   headshot_url?: string
   phone?: string
   email?: string
   title?: string
   license_number?: string
+  dre_license?: string
   bio?: string
 }
 
@@ -31,19 +66,137 @@ export interface Contact {
   phone?: string
   company?: string
   address?: string
+  phones?: PhoneEntry[]
+  emails?: EmailEntry[]
+  mailing_address?: string
   city?: string
   state?: string
   zip?: string
+  contact_type?: ContactType
+  lead_status?: LeadStatus
+  tags: string[]
+  investment_criteria?: InvestmentCriteria
+  do_not_call?: boolean
+  do_not_email?: boolean
+  last_skip_traced_at?: string
+  skip_trace_provider?: string
+  skip_trace_confidence?: number
+  lead_source?: string
+  avatar_url?: string
+  notes?: string
+  is_buyer?: boolean
+  is_seller?: boolean
+  is_active?: boolean
   unit_count_min?: number
   unit_count_max?: number
-  tags: string[]
-  notes?: string
-  is_buyer: boolean
-  is_seller: boolean
-  is_active: boolean
   created_at: string
 }
 
+export interface Deal {
+  id: string
+  team_id: string
+  property_id?: string
+  contact_id?: string
+  title: string
+  stage: DealStage
+  deal_type: 'Sale' | 'Lease' | 'Development' | 'Management'
+  asking_price?: number
+  offer_price?: number
+  commission_pct?: number
+  commission_est?: number
+  probability?: number
+  close_date_est?: string
+  assigned_to?: string
+  notes?: string
+  tags?: string[]
+  created_at: string
+  updated_at: string
+  property?: Property
+  contact?: Contact
+}
+
+export interface Communication {
+  id: string
+  team_id: string
+  contact_id?: string
+  deal_id?: string
+  channel: CommChannel
+  direction: 'inbound' | 'outbound'
+  subject?: string
+  body: string
+  from_address?: string
+  to_address?: string
+  status: 'sent' | 'delivered' | 'read' | 'failed' | 'draft'
+  read_at?: string
+  created_at: string
+  contact?: Contact
+}
+
+export interface Task {
+  id: string
+  team_id: string
+  contact_id?: string
+  deal_id?: string
+  property_id?: string
+  title: string
+  description?: string
+  due_date?: string
+  priority: TaskPriority
+  completed: boolean
+  completed_at?: string
+  assigned_to?: string
+  created_at: string
+  contact?: Contact
+  deal?: Deal
+}
+
+export interface SkipTraceRequest {
+  id: string
+  team_id: string
+  contact_id: string
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  provider?: string
+  raw_result?: Record<string, unknown>
+  phones_found?: PhoneEntry[]
+  emails_found?: EmailEntry[]
+  confidence_score?: number
+  created_at: string
+  completed_at?: string
+}
+
+export interface CompIngestionLog {
+  id: string
+  team_id: string
+  source: 'MLS' | 'CoStar' | 'Manual' | 'CSV' | 'Zapier'
+  status: 'pending' | 'processing' | 'completed' | 'failed'
+  records_total?: number
+  records_imported?: number
+  records_failed?: number
+  error_log?: string
+  created_at: string
+}
+
+export interface Entity {
+  id: string
+  team_id: string
+  name: string
+  entity_type: 'LLC' | 'LP' | 'Corp' | 'Trust' | 'Individual' | 'Other'
+  ein?: string
+  state_of_formation?: string
+  registered_agent?: string
+  address?: string
+  notes?: string
+  created_at: string
+}
+
+export interface BuyerMatch {
+  contact: Contact
+  score: number
+  match_reasons: string[]
+  mismatches: string[]
+}
+
+// ─── Phase 1 / 2 Types ──────────────────────────────────────────────────────
 export interface Property {
   id: string
   team_id: string
@@ -68,11 +221,9 @@ export interface Property {
   is_om: boolean
   is_sale_comp: boolean
   is_rent_comp: boolean
-  // V1.1 — Photo & unit data
   unit_mix?: string
   unit_sf?: number
   photo_url?: string
-  // V1.2 — Debt model
   apn?: string
   noi?: number
   gross_scheduled_income?: number
@@ -87,7 +238,6 @@ export interface Property {
   dscr?: number
   cash_on_cash?: number
   equity_invested?: number
-  // Phase 2 — Demographics & Market Overview
   population?: number
   median_age?: number
   median_hh_income?: number
@@ -98,7 +248,6 @@ export interface Property {
   location_highlights?: string[]
   investment_highlights?: string[]
   property_amenities?: string[]
-  // Phase 2 — Expense detail
   gross_sf?: number
   lot_sf?: number
   rent_increase_pct?: number
@@ -135,7 +284,6 @@ export interface PropertyComp {
   comp_id: string
 }
 
-// Unified comp feed item (returned by RPCs)
 export interface CompFeedItem {
   id: string
   source: CompSource
@@ -153,16 +301,14 @@ export interface CompFeedItem {
   building_size_sf?: number
   is_sale_comp: boolean
   is_rent_comp: boolean
-  unit_mix?: string        // e.g. "2x 2BD/1BA, 2x 1BD/1BA" — sale comps
-  unit_sf?: number          // avg unit square footage — rent comps
-  photo_url?: string        // Supabase Storage public URL
-  monthly_rent?: number     // rent comps
-  unit_type?: string        // rent comps unit type label
-  // Computed client-side
+  unit_mix?: string
+  unit_sf?: number
+  photo_url?: string
+  monthly_rent?: number
+  unit_type?: string
   distance_miles?: number
 }
 
-// Financial calculator types
 export interface SensitivityRow {
   adjustment: number
   price: number

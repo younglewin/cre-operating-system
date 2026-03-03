@@ -2,6 +2,7 @@ import { useState } from 'react'
 import { FileText, Download, Settings, BarChart2, Image, Users, CheckCircle, Loader2, AlertTriangle } from 'lucide-react'
 import { generateOM } from '../lib/generateOM'
 import { SUBJECT_PROPERTY, SALE_COMPS, RENT_COMPS } from '../lib/mockData'
+import type { TeamMember } from '../types'
 
 const GOLD  = '#C5963A'
 const TEAL  = '#3B9CB5'
@@ -38,6 +39,34 @@ export default function OMGeneratorPage() {
     setSlides(prev => prev.map(s => s.id === id ? { ...s, enabled: !s.enabled } : s))
   }
 
+  // Broker data — in production this comes from Supabase team_members
+  const BROKERS: TeamMember[] = [
+    {
+      id: 'broker-1',
+      team_id: 'team-1',
+      user_id: 'user-1',
+      role: 'Admin',
+      full_name: 'Shane Young',
+      email: 'Shane@YoungLewin.com',
+      phone: '(562) 556-1118',
+      title: 'Managing Partner',
+      dre_license: 'DRE #02345678',
+      headshot_url: undefined,
+    },
+    {
+      id: 'broker-2',
+      team_id: 'team-1',
+      user_id: 'user-2',
+      role: 'Admin',
+      full_name: 'Dan Lewin',
+      email: 'Dan@YoungLewin.com',
+      phone: '(562) 556-1119',
+      title: 'Managing Partner',
+      dre_license: 'DRE #02345679',
+      headshot_url: undefined,
+    },
+  ]
+
   const handleGenerate = async () => {
     setGenerating(true)
     setDone(false)
@@ -48,6 +77,7 @@ export default function OMGeneratorPage() {
         saleComps: SALE_COMPS,
         rentComps: RENT_COMPS,
         type: docType,
+        brokers: BROKERS,
       })
       setDone(true)
     } catch (err: unknown) {
