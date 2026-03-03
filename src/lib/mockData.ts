@@ -1,8 +1,7 @@
-import { Property, CompFeedItem } from '../types'
+import type { Property, CompFeedItem } from '../types'
 
 // ============================================================
 // SUBJECT PROPERTY — Naples Island, Long Beach CA 90803
-// UUID matches seeded database record
 // ============================================================
 export const SUBJECT_PROPERTY: Property = {
   id: '10000000-0000-0000-0000-000000000001',
@@ -53,6 +52,8 @@ export const SALE_COMPS: CompFeedItem[] = [
     building_size_sf: 4400,
     is_sale_comp: true,
     is_rent_comp: false,
+    unit_mix: '2x 2BD/1BA, 2x 1BD/1BA',
+    photo_url: undefined,
   },
   {
     id: '20000000-0000-0000-0000-000000000002',
@@ -71,6 +72,8 @@ export const SALE_COMPS: CompFeedItem[] = [
     building_size_sf: 4600,
     is_sale_comp: true,
     is_rent_comp: false,
+    unit_mix: '4x 2BD/1BA',
+    photo_url: undefined,
   },
   {
     id: '20000000-0000-0000-0000-000000000003',
@@ -89,6 +92,8 @@ export const SALE_COMPS: CompFeedItem[] = [
     building_size_sf: 6800,
     is_sale_comp: true,
     is_rent_comp: false,
+    unit_mix: '2x 3BD/2BA, 4x 2BD/1BA',
+    photo_url: undefined,
   },
   {
     id: '20000000-0000-0000-0000-000000000004',
@@ -107,6 +112,8 @@ export const SALE_COMPS: CompFeedItem[] = [
     building_size_sf: 4200,
     is_sale_comp: true,
     is_rent_comp: false,
+    unit_mix: '2x 2BD/1BA, 2x Studio',
+    photo_url: undefined,
   },
   {
     id: '20000000-0000-0000-0000-000000000005',
@@ -125,6 +132,8 @@ export const SALE_COMPS: CompFeedItem[] = [
     building_size_sf: 8400,
     is_sale_comp: true,
     is_rent_comp: false,
+    unit_mix: '4x 2BD/1BA, 4x 1BD/1BA',
+    photo_url: undefined,
   },
   {
     id: '20000000-0000-0000-0000-000000000006',
@@ -143,6 +152,8 @@ export const SALE_COMPS: CompFeedItem[] = [
     building_size_sf: 4500,
     is_sale_comp: true,
     is_rent_comp: false,
+    unit_mix: '2x 2BD/1BA, 1x 1BD/1BA, 1x Studio',
+    photo_url: undefined,
   },
 ]
 
@@ -157,7 +168,7 @@ export const RENT_COMPS: CompFeedItem[] = [
     address: '415 The Toledo, Long Beach, CA 90803',
     latitude: 33.7610,
     longitude: -118.1230,
-    price: 2850, // monthly rent
+    price: 2850,
     cap_rate: undefined,
     grm: undefined,
     price_per_sf: 3.17,
@@ -167,6 +178,8 @@ export const RENT_COMPS: CompFeedItem[] = [
     building_size_sf: 900,
     is_sale_comp: false,
     is_rent_comp: true,
+    unit_sf: 900,
+    photo_url: undefined,
   },
   {
     id: '30000000-0000-0000-0000-000000000002',
@@ -185,6 +198,8 @@ export const RENT_COMPS: CompFeedItem[] = [
     building_size_sf: 850,
     is_sale_comp: false,
     is_rent_comp: true,
+    unit_sf: 850,
+    photo_url: undefined,
   },
   {
     id: '30000000-0000-0000-0000-000000000003',
@@ -203,6 +218,8 @@ export const RENT_COMPS: CompFeedItem[] = [
     building_size_sf: 700,
     is_sale_comp: false,
     is_rent_comp: true,
+    unit_sf: 700,
+    photo_url: undefined,
   },
   {
     id: '30000000-0000-0000-0000-000000000004',
@@ -221,6 +238,8 @@ export const RENT_COMPS: CompFeedItem[] = [
     building_size_sf: 1200,
     is_sale_comp: false,
     is_rent_comp: true,
+    unit_sf: 1200,
+    photo_url: undefined,
   },
   {
     id: '30000000-0000-0000-0000-000000000005',
@@ -239,6 +258,8 @@ export const RENT_COMPS: CompFeedItem[] = [
     building_size_sf: 950,
     is_sale_comp: false,
     is_rent_comp: true,
+    unit_sf: 950,
+    photo_url: undefined,
   },
 ]
 

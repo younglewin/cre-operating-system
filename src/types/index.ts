@@ -80,6 +80,9 @@ export interface CompFeedItem {
   building_size_sf?: number
   is_sale_comp: boolean
   is_rent_comp: boolean
+  unit_mix?: string        // e.g. "2x 2BD/1BA, 2x 1BD/1BA" — sale comps
+  unit_sf?: number          // avg unit square footage — rent comps
+  photo_url?: string        // Supabase Storage public URL
   // Computed client-side
   distance_miles?: number
 }
