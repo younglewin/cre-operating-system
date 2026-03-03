@@ -4,6 +4,7 @@ import CompsPage from './pages/CompsPage'
 import PricingPage from './pages/PricingPage'
 import ExchangePage from './pages/ExchangePage'
 import DashboardPage from './pages/DashboardPage'
+import UnderwritingPage from './pages/UnderwritingPage'
 
 export default function App() {
   return (
@@ -15,6 +16,7 @@ export default function App() {
           <Route path="comps" element={<CompsPage />} />
           <Route path="pricing" element={<PricingPage />} />
           <Route path="exchange" element={<ExchangePage />} />
+          <Route path="underwriting" element={<UnderwritingPage />} />
         </Route>
       </Routes>
     </BrowserRouter>

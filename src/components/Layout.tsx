@@ -6,13 +6,15 @@ import {
   RefreshCw,
   Building2,
   ChevronRight,
+  Calculator,
 } from 'lucide-react'
 
 const NAV_ITEMS = [
-  { path: '/dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { path: '/comps', label: 'Deal Engine', icon: Map },
-  { path: '/pricing', label: 'Pricing Matrix', icon: TrendingUp },
-  { path: '/exchange', label: '1031 Exchange', icon: RefreshCw },
+  { path: '/dashboard',    label: 'Dashboard',     icon: LayoutDashboard },
+  { path: '/comps',        label: 'Deal Engine',   icon: Map },
+  { path: '/underwriting', label: 'Underwriting',  icon: Calculator },
+  { path: '/pricing',      label: 'Pricing Matrix',icon: TrendingUp },
+  { path: '/exchange',     label: '1031 Exchange', icon: RefreshCw },
 ]
 
 export default function Layout() {
@@ -22,6 +24,7 @@ export default function Layout() {
     const item = NAV_ITEMS.find(n => location.pathname.startsWith(n.path))
     return item?.label ?? 'CRE OS'
   }
+
 
   return (
     <div className="flex h-screen overflow-hidden" style={{ backgroundColor: '#0F172A', fontFamily: 'Inter, sans-serif' }}>
@@ -82,7 +85,7 @@ export default function Layout() {
           className="px-4 py-3 border-t text-xs"
           style={{ borderColor: 'rgba(197,150,58,0.2)', color: 'rgba(248,250,252,0.3)' }}
         >
-          Phase 1 — Deal Engine
+          Phase 1 · V1.2
         </div>
       </aside>
 
