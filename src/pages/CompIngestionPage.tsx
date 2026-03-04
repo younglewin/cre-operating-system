@@ -1,562 +1,432 @@
-import { useState, useRef, useCallback } from 'react'
-import {
-  Upload, Download, ChevronRight, CheckCircle, AlertCircle,
-  RefreshCw, X, Plus, Building2, Home, DollarSign,
-  ArrowRight, Link2
-} from 'lucide-react'
+import { useState, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
-
-// ─── Schema Definitions ───────────────────────────────────────────────────────
-const SALE_SCHEMA = [
-  { key:'address',        label:'Address',          required:true,  type:'text',   hint:'Street address' },
-  { key:'city',           label:'City',             required:true,  type:'text',   hint:'City name' },
-  { key:'state',          label:'State',            required:false, type:'text',   hint:'Two-letter state code' },
-  { key:'zip_code',       label:'ZIP Code',         required:false, type:'text',   hint:'5-digit ZIP' },
-  { key:'sale_price',     label:'Sale Price',       required:true,  type:'number', hint:'Closed sale price in dollars' },
-  { key:'close_date',     label:'Close Date',       required:true,  type:'date',   hint:'YYYY-MM-DD or MM/DD/YYYY' },
-  { key:'units',          label:'Units',            required:true,  type:'number', hint:'Number of residential units' },
-  { key:'sqft',           label:'Sq Ft',            required:false, type:'number', hint:'Total building square footage' },
-  { key:'year_built',     label:'Year Built',       required:false, type:'number', hint:'Year constructed' },
-  { key:'cap_rate',       label:'Cap Rate (%)',      required:false, type:'number', hint:'Cap rate at sale, e.g. 5.25' },
-  { key:'grm',            label:'GRM',              required:false, type:'number', hint:'Gross rent multiplier' },
-  { key:'price_per_unit', label:'Price / Unit',     required:false, type:'number', hint:'Auto-calculated if blank' },
-  { key:'price_per_sqft', label:'Price / Sq Ft',   required:false, type:'number', hint:'Auto-calculated if blank' },
-  { key:'noi',            label:'NOI',              required:false, type:'number', hint:'Net operating income at sale' },
-  { key:'source',         label:'Source',           required:false, type:'text',   hint:'CoStar, LoopNet, MLS, etc.' },
-  { key:'notes',          label:'Notes',            required:false, type:'text',   hint:'Additional notes' },
-] as const
-
-const RENT_BLDG_SCHEMA = [
-  { key:'address',       label:'Address',          required:true,  type:'text',   hint:'Building street address' },
-  { key:'city',          label:'City',             required:true,  type:'text',   hint:'City name' },
-  { key:'state',         label:'State',            required:false, type:'text',   hint:'Two-letter state code' },
-  { key:'zip_code',      label:'ZIP Code',         required:false, type:'text',   hint:'5-digit ZIP' },
-  { key:'total_units',   label:'Total Units',      required:true,  type:'number', hint:'Total units in building' },
-  { key:'year_built',    label:'Year Built',       required:false, type:'number', hint:'Year constructed' },
-  { key:'sqft_building', label:'Building Sq Ft',   required:false, type:'number', hint:'Total building sq ft' },
-  { key:'vacancy_rate',  label:'Vacancy Rate (%)', required:false, type:'number', hint:'Current vacancy, e.g. 5.0' },
-  { key:'source',        label:'Source',           required:false, type:'text',   hint:'Data source' },
-  { key:'notes',         label:'Notes',            required:false, type:'text',   hint:'Building notes' },
-] as const
-
-const RENT_UNIT_SCHEMA = [
-  { key:'building_address', label:'Building Address', required:true,  type:'text',   hint:'Must match parent building address' },
-  { key:'unit_type',        label:'Unit Type',        required:true,  type:'text',   hint:'Studio, 1BR/1BA, 2BR/1BA, etc.' },
-  { key:'unit_number',      label:'Unit #',           required:false, type:'text',   hint:'Optional unit identifier' },
-  { key:'sqft',             label:'Sq Ft',            required:false, type:'number', hint:'Unit square footage' },
-  { key:'asking_rent',      label:'Asking Rent',      required:true,  type:'number', hint:'Monthly asking rent in dollars' },
-  { key:'effective_rent',   label:'Effective Rent',   required:false, type:'number', hint:'Rent after concessions' },
-  { key:'rent_per_sqft',    label:'Rent / Sq Ft',     required:false, type:'number', hint:'Auto-calculated if blank' },
-  { key:'lease_date',       label:'Lease Date',       required:false, type:'date',   hint:'Date of lease or survey' },
-  { key:'concessions',      label:'Concessions',      required:false, type:'text',   hint:'e.g. 1 month free' },
-  { key:'notes',            label:'Notes',            required:false, type:'text',   hint:'Unit notes' },
-] as const
+import { Upload, Download, CheckCircle, Loader2, FileText, AlertCircle, Info } from 'lucide-react'
 
 type CompType = 'sale' | 'rent_building' | 'rent_unit'
 type Step = 'type' | 'schema' | 'upload' | 'map' | 'preview' | 'done'
+interface ColDef { key: string; label: string; required: boolean; type: string; description: string; example: string }
 
-// ─── Alias Maps ───────────────────────────────────────────────────────────────
-const SALE_ALIASES: Record<string,string> = {
-  'property address':'address','street address':'address','addr':'address','address':'address',
-  'city':'city','municipality':'city',
-  'state':'state','st':'state',
-  'zip':'zip_code','zip code':'zip_code','postal code':'zip_code','postal_code':'zip_code',
-  'sale price':'sale_price','sold price':'sale_price','close price':'sale_price','sales price':'sale_price','price':'sale_price','transaction price':'sale_price',
-  'close date':'close_date','sold date':'close_date','closing date':'close_date','transaction date':'close_date','recording date':'close_date',
-  'units':'units','unit count':'units','# units':'units','number of units':'units','total units':'units','residential units':'units',
-  'sqft':'sqft','sq ft':'sqft','square feet':'sqft','building size':'sqft','gla':'sqft','building sqft':'sqft','rentable sqft':'sqft',
-  'year built':'year_built','yr built':'year_built','built':'year_built',
-  'cap rate':'cap_rate','capitalization rate':'cap_rate','cap':'cap_rate',
-  'grm':'grm','gross rent multiplier':'grm',
-  'price per unit':'price_per_unit','ppu':'price_per_unit',
-  'price per sqft':'price_per_sqft','price/sf':'price_per_sqft','price per sf':'price_per_sqft',
-  'noi':'noi','net operating income':'noi',
-  'source':'source','data source':'source',
-  'notes':'notes','comments':'notes','remarks':'notes',
-}
-const RENT_BLDG_ALIASES: Record<string,string> = {
-  'property address':'address','street address':'address','address':'address',
-  'city':'city','state':'state','zip':'zip_code','zip code':'zip_code',
-  'total units':'total_units','units':'total_units','unit count':'total_units',
-  'year built':'year_built','yr built':'year_built',
-  'building sqft':'sqft_building','building size':'sqft_building','sq ft':'sqft_building','sqft':'sqft_building',
-  'vacancy':'vacancy_rate','vacancy rate':'vacancy_rate','vacancy %':'vacancy_rate',
-  'source':'source','notes':'notes','comments':'notes',
-}
-const RENT_UNIT_ALIASES: Record<string,string> = {
-  'building address':'building_address','property address':'building_address','address':'building_address',
-  'unit type':'unit_type','type':'unit_type','bed/bath':'unit_type','floorplan':'unit_type',
-  'unit':'unit_number','unit #':'unit_number','unit number':'unit_number',
-  'sqft':'sqft','sq ft':'sqft','unit sqft':'sqft','unit size':'sqft',
-  'asking rent':'asking_rent','rent':'asking_rent','asking':'asking_rent','list rent':'asking_rent',
-  'effective rent':'effective_rent','net rent':'effective_rent',
-  'rent/sqft':'rent_per_sqft','rent per sqft':'rent_per_sqft','rent/sf':'rent_per_sqft',
-  'lease date':'lease_date','date':'lease_date','survey date':'lease_date',
-  'concessions':'concessions','concession':'concessions',
-  'notes':'notes','comments':'notes',
+const SALE_COLS: ColDef[] = [
+  { key:'address',        label:'Address',        required:true,  type:'text',    description:'Street address of the property',                     example:'1234 E 2nd St' },
+  { key:'city',           label:'City',           required:true,  type:'text',    description:'City',                                               example:'Long Beach' },
+  { key:'state',          label:'State',          required:true,  type:'text',    description:'2-letter state code',                                example:'CA' },
+  { key:'zip_code',       label:'ZIP Code',       required:true,  type:'text',    description:'5-digit ZIP code',                                   example:'90803' },
+  { key:'sale_price',     label:'Sale Price',     required:true,  type:'number',  description:'Closed sale price in dollars',                       example:'2850000' },
+  { key:'close_date',     label:'Close Date',     required:true,  type:'date',    description:'Date the sale closed (YYYY-MM-DD)',                  example:'2025-11-15' },
+  { key:'units',          label:'Units',          required:true,  type:'integer', description:'Total number of residential units',                  example:'4' },
+  { key:'sqft',           label:'Sq Ft',          required:false, type:'integer', description:'Total gross building square footage',                example:'3800' },
+  { key:'lot_sqft',       label:'Lot Sq Ft',      required:false, type:'integer', description:'Lot size in square feet',                            example:'5200' },
+  { key:'year_built',     label:'Year Built',     required:false, type:'integer', description:'Year the building was constructed',                  example:'1962' },
+  { key:'cap_rate',       label:'Cap Rate',       required:false, type:'decimal', description:'Capitalization rate at time of sale (decimal)',      example:'0.0485' },
+  { key:'grm',            label:'GRM',            required:false, type:'decimal', description:'Gross rent multiplier',                              example:'14.2' },
+  { key:'noi',            label:'NOI',            required:false, type:'number',  description:'Net operating income at time of sale',               example:'138225' },
+  { key:'price_per_unit', label:'Price / Unit',   required:false, type:'number',  description:'Sale price divided by units (auto-derived if blank)',example:'712500' },
+  { key:'price_per_sqft', label:'Price / Sq Ft',  required:false, type:'number',  description:'Sale price divided by sq ft (auto-derived if blank)',example:'750' },
+  { key:'source',         label:'Source',         required:false, type:'text',    description:'Data source (CoStar, MLS, LoopNet, etc.)',           example:'CoStar' },
+]
+
+const RENT_BLDG_COLS: ColDef[] = [
+  { key:'address',         label:'Address',         required:true,  type:'text',    description:'Street address of the building',                   example:'500 Termino Ave' },
+  { key:'city',            label:'City',            required:true,  type:'text',    description:'City',                                             example:'Long Beach' },
+  { key:'state',           label:'State',           required:true,  type:'text',    description:'2-letter state code',                              example:'CA' },
+  { key:'zip_code',        label:'ZIP Code',        required:true,  type:'text',    description:'5-digit ZIP code',                                 example:'90803' },
+  { key:'units',           label:'Total Units',     required:true,  type:'integer', description:'Total number of units in the building',            example:'12' },
+  { key:'year_built',      label:'Year Built',      required:false, type:'integer', description:'Year the building was constructed',                example:'1975' },
+  { key:'sqft',            label:'Bldg Sq Ft',      required:false, type:'integer', description:'Total gross building square footage',              example:'9600' },
+  { key:'occupancy_pct',   label:'Occupancy %',     required:false, type:'decimal', description:'Current occupancy rate (0.00-1.00)',               example:'0.95' },
+  { key:'avg_rent',        label:'Avg Rent / Unit', required:false, type:'number',  description:'Average monthly rent across all units',            example:'2200' },
+  { key:'effective_gross', label:'Effective Gross', required:false, type:'number',  description:'Annual effective gross income',                    example:'285600' },
+  { key:'parking',         label:'Parking',         required:false, type:'text',    description:'Parking type (Surface, Garage, Carport, Street)',  example:'Carport' },
+  { key:'amenities',       label:'Amenities',       required:false, type:'text',    description:'Comma-separated amenity list',                     example:'Laundry Pool' },
+  { key:'source',          label:'Source',          required:false, type:'text',    description:'Data source',                                      example:'CoStar' },
+]
+
+const RENT_UNIT_COLS: ColDef[] = [
+  { key:'parent_address',  label:'Parent Address',  required:true,  type:'text',    description:'Street address of the parent building (must match an existing Rent Comp Building)', example:'500 Termino Ave' },
+  { key:'unit_type',       label:'Unit Type',       required:true,  type:'text',    description:'Unit mix label (Studio, 1BR/1BA, 2BR/1BA, etc.)',  example:'2BR/1BA' },
+  { key:'unit_sqft',       label:'Unit Sq Ft',      required:true,  type:'integer', description:'Square footage of this unit type',                 example:'850' },
+  { key:'asking_rent',     label:'Asking Rent',     required:true,  type:'number',  description:'Current asking monthly rent',                      example:'2400' },
+  { key:'effective_rent',  label:'Effective Rent',  required:false, type:'number',  description:'Effective monthly rent after concessions',         example:'2350' },
+  { key:'beds',            label:'Beds',            required:false, type:'integer', description:'Number of bedrooms',                               example:'2' },
+  { key:'baths',           label:'Baths',           required:false, type:'decimal', description:'Number of bathrooms',                              example:'1' },
+  { key:'unit_count',      label:'Unit Count',      required:false, type:'integer', description:'Number of units of this type in the building',     example:'4' },
+  { key:'concessions',     label:'Concessions',     required:false, type:'text',    description:'Current concession offers',                        example:'1 month free' },
+  { key:'lease_term',      label:'Lease Term',      required:false, type:'text',    description:'Standard lease term',                              example:'12 months' },
+  { key:'date_surveyed',   label:'Date Surveyed',   required:false, type:'date',    description:'Date this rent data was collected (YYYY-MM-DD)',   example:'2025-12-01' },
+  { key:'furnished',       label:'Furnished',       required:false, type:'boolean', description:'Whether unit is furnished (true/false)',            example:'false' },
+  { key:'source',          label:'Source',          required:false, type:'text',    description:'Data source',                                      example:'CoStar' },
+]
+
+const ALIASES: Record<string, string[]> = {
+  address:['address','street','street address','property address','prop address','location'],
+  city:['city','municipality'], state:['state','st','province'],
+  zip_code:['zip','zip code','zip_code','postal','postal code'],
+  sale_price:['sale price','sales price','sold price','close price','closing price','price','sale_price'],
+  close_date:['close date','closing date','sold date','sale date','close_date','date sold'],
+  units:['units','unit count','# units','number of units','total units','no. units'],
+  sqft:['sqft','sq ft','building sqft','gross sqft','building sf','total sqft','bldg sqft','gba'],
+  lot_sqft:['lot sqft','lot sf','lot size','land area','lot area'],
+  year_built:['year built','yr built','built','year_built'],
+  cap_rate:['cap rate','cap_rate','capitalization rate'],
+  grm:['grm','gross rent multiplier','gross rent mult'],
+  noi:['noi','net operating income','net income'],
+  price_per_unit:['price per unit','$/unit','price/unit','ppu'],
+  price_per_sqft:['price per sqft','price per sf','$/sqft','$/sf','ppsf'],
+  source:['source','data source','provider'],
+  avg_rent:['avg rent','average rent','avg monthly rent','mean rent'],
+  occupancy_pct:['occupancy','occupancy %','occ %','occupancy rate','occ rate'],
+  effective_gross:['effective gross','egi','effective gross income'],
+  parking:['parking','parking type'], amenities:['amenities','features','building amenities'],
+  parent_address:['parent address','building address','parent_address'],
+  unit_type:['unit type','unit mix','type','floor plan','floorplan'],
+  unit_sqft:['unit sqft','unit sf','unit size','apt sqft'],
+  asking_rent:['asking rent','ask rent','list rent','market rent','rent'],
+  effective_rent:['effective rent','eff rent','net rent'],
+  beds:['beds','bedrooms','br','bd'], baths:['baths','bathrooms','ba'],
+  unit_count:['unit count','# of units','count','units of type'],
+  concessions:['concessions','concession','specials'],
+  lease_term:['lease term','term','lease length'],
+  date_surveyed:['date surveyed','survey date','date_surveyed','date'],
+  furnished:['furnished','is furnished'],
 }
 
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-function parseCsv(text: string): Record<string,string>[] {
-  const lines = text.split(/\r?\n/).filter(l => l.trim())
-  if (lines.length < 2) return []
-  const headers = lines[0].split(',').map(h => h.trim())
-  return lines.slice(1).map(line => {
-    const vals = line.split(',')
-    const row: Record<string,string> = {}
-    headers.forEach((h,i) => { row[h] = (vals[i]??'').trim() })
-    return row
-  }).filter(r => Object.values(r).some(v => v))
-}
+const S: React.CSSProperties = { background:'rgba(27,42,74,0.6)', border:'1px solid rgba(248,250,252,0.1)', color:'#F8FAFC', borderRadius:4, padding:'6px 10px', width:'100%', fontSize:13 }
+const L: React.CSSProperties = { color:'rgba(248,250,252,0.4)', fontSize:'9px', textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:4 }
 
-function autoMap(headers: string[], aliases: Record<string,string>): Record<string,string> {
+function autoMap(headers: string[], cols: ColDef[]): Record<string,string> {
   const m: Record<string,string> = {}
   headers.forEach(h => {
-    const n = h.toLowerCase().trim()
-    if (aliases[n]) m[h] = aliases[n]
-    else if (aliases[n.replace(/_/g,' ')]) m[h] = aliases[n.replace(/_/g,' ')]
+    const lower = h.toLowerCase().trim()
+    for (const col of cols) {
+      const alts = ALIASES[col.key] || [col.key]
+      if (alts.includes(lower)) { m[col.key] = h; break }
+    }
   })
   return m
 }
 
-function parseNum(v?: string): number|null {
-  if (!v) return null
-  const n = parseFloat(v.replace(/[$,%\s]/g,''))
-  return isNaN(n) ? null : n
+function parseCSV(text: string): { headers: string[]; rows: string[][] } {
+  const lines = text.split(/\r?\n/).filter(l => l.trim())
+  if (lines.length < 2) return { headers:[], rows:[] }
+  const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g,''))
+  const rows = lines.slice(1).map(l => {
+    const vals: string[] = []; let cur = '', inQ = false
+    for (const ch of l) {
+      if (ch==='"') { inQ=!inQ } else if (ch===',' && !inQ) { vals.push(cur.trim()); cur='' } else cur+=ch
+    }
+    vals.push(cur.trim())
+    return vals.map(v => v.replace(/^"|"$/g,''))
+  }).filter(r => r.some(v => v))
+  return { headers, rows }
 }
 
-function parseDate(v?: string): string|null {
-  if (!v) return null
-  const mm = v.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/)
-  if (mm) return `${mm[3]}-${mm[1].padStart(2,'0')}-${mm[2].padStart(2,'0')}`
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v
-  return null
+function getVal(row: string[], headers: string[], mapping: Record<string,string>, key: string): string {
+  const h = mapping[key]; if (!h) return ''
+  const idx = headers.indexOf(h); return idx >= 0 ? (row[idx]||'') : ''
 }
 
-function genSampleCsv(type: CompType): string {
-  if (type==='sale') {
-    return [SALE_SCHEMA.map(c=>c.key).join(','),
-      '123 Appian Way,Long Beach,CA,90803,2850000,2025-11-15,4,3200,1965,5.25,13.2,712500,890.6,149625,CoStar,Naples Island 4-plex',
-      '456 Belmont Ave,Long Beach,CA,90803,3100000,2025-10-01,6,4800,1972,5.10,12.8,516667,645.8,158100,LoopNet,Belmont Shore 6-unit',
-    ].join('\n')
-  }
-  if (type==='rent_building') {
-    return [RENT_BLDG_SCHEMA.map(c=>c.key).join(','),
-      '100 Ocean Blvd,Long Beach,CA,90803,8,1968,6400,3.5,CoStar,Oceanfront 8-unit',
-      '200 Alamitos Ave,Long Beach,CA,90803,12,1975,9600,5.0,LoopNet,Alamitos 12-unit',
-    ].join('\n')
-  }
-  return [RENT_UNIT_SCHEMA.map(c=>c.key).join(','),
-    '100 Ocean Blvd,1BR/1BA,101,750,2850,2800,3.80,2025-11-01,No concessions,Ocean view',
-    '100 Ocean Blvd,2BR/1BA,201,1050,3600,3500,3.43,2025-11-01,1 month free,Top floor',
-    '200 Alamitos Ave,Studio,,500,1950,1900,3.90,2025-10-15,No concessions,',
-  ].join('\n')
+function sampleCSV(type: CompType): string {
+  if (type==='sale') return 'address,city,state,zip_code,sale_price,close_date,units,sqft,lot_sqft,year_built,cap_rate,grm,noi,price_per_unit,price_per_sqft,source\n1234 E 2nd St,Long Beach,CA,90803,2850000,2025-11-15,4,3800,5200,1962,0.0485,14.2,138225,712500,750,CoStar\n456 Termino Ave,Long Beach,CA,90803,3200000,2025-10-01,6,5400,6000,1958,0.0510,13.8,163200,533333,593,MLS'
+  if (type==='rent_building') return 'address,city,state,zip_code,units,year_built,sqft,occupancy_pct,avg_rent,effective_gross,parking,amenities,source\n500 Termino Ave,Long Beach,CA,90803,12,1975,9600,0.95,2200,285600,Carport,Laundry Pool,CoStar'
+  return 'parent_address,unit_type,unit_sqft,asking_rent,effective_rent,beds,baths,unit_count,concessions,lease_term,date_surveyed,furnished,source\n500 Termino Ave,Studio,450,1800,1800,0,1,2,,12 months,2025-12-01,false,CoStar\n500 Termino Ave,1BR/1BA,650,2200,2150,1,1,6,1 month free,12 months,2025-12-01,false,CoStar\n500 Termino Ave,2BR/1BA,850,2600,2550,2,1,4,,12 months,2025-12-01,false,CoStar'
 }
 
-function dlCsv(content: string, filename: string) {
-  const a = document.createElement('a')
-  a.href = URL.createObjectURL(new Blob([content],{type:'text/csv'}))
-  a.download = filename; a.click()
-}
-
-// ─── Schema Panel ─────────────────────────────────────────────────────────────
-function SchemaPanel({ type }: { type: CompType }) {
-  const schema = type==='sale' ? SALE_SCHEMA : type==='rent_building' ? RENT_BLDG_SCHEMA : RENT_UNIT_SCHEMA
+function SchemaTable({ cols }: { cols: ColDef[] }) {
   return (
-    <table className="w-full text-xs">
-      <thead><tr style={{ backgroundColor:'rgba(27,42,74,0.8)' }}>
-        {['Column Key','Label','Required','Type','Description'].map(h=>(
-          <th key={h} className="px-3 py-2 text-left font-semibold" style={{ color:'#C5963A',fontSize:'9px',textTransform:'uppercase' }}>{h}</th>
-        ))}
-      </tr></thead>
-      <tbody>
-        {schema.map(col=>(
-          <tr key={col.key} style={{ borderBottom:'1px solid rgba(248,250,252,0.04)' }}>
-            <td className="px-3 py-2 font-mono" style={{ color:'#3B9CB5',fontSize:'10px' }}>{col.key}</td>
-            <td className="px-3 py-2 font-medium" style={{ color:'#F8FAFC' }}>{col.label}</td>
-            <td className="px-3 py-2">
-              {col.required
-                ? <span className="px-1.5 py-0.5" style={{ backgroundColor:'rgba(239,68,68,0.15)',color:'#ef4444',fontSize:'9px' }}>Required</span>
-                : <span className="px-1.5 py-0.5" style={{ backgroundColor:'rgba(248,250,252,0.06)',color:'rgba(248,250,252,0.35)',fontSize:'9px' }}>Optional</span>}
-            </td>
-            <td className="px-3 py-2" style={{ color:'rgba(248,250,252,0.5)' }}>{col.type}</td>
-            <td className="px-3 py-2" style={{ color:'rgba(248,250,252,0.4)' }}>{col.hint}</td>
+    <div style={{ overflowX:'auto' }}>
+      <table style={{ width:'100%', borderCollapse:'collapse', fontSize:12 }}>
+        <thead>
+          <tr style={{ background:'rgba(15,23,42,0.8)' }}>
+            {['Column','Required','Type','Description','Example'].map(h=>(
+              <th key={h} style={{ padding:'8px 12px', textAlign:'left', ...L, fontWeight:700 }}>{h}</th>
+            ))}
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {cols.map(col=>(
+            <tr key={col.key} style={{ borderTop:'1px solid rgba(248,250,252,0.05)' }}>
+              <td style={{ padding:'7px 12px', color:'#C5963A', fontFamily:'monospace', fontSize:11 }}>{col.key}</td>
+              <td style={{ padding:'7px 12px' }}>
+                <span style={{ background:col.required?'rgba(239,68,68,0.15)':'rgba(248,250,252,0.06)', color:col.required?'#ef4444':'rgba(248,250,252,0.4)', border:`1px solid ${col.required?'rgba(239,68,68,0.3)':'rgba(248,250,252,0.1)'}`, borderRadius:3, padding:'1px 6px', fontSize:10, fontWeight:600 }}>
+                  {col.required?'Required':'Optional'}
+                </span>
+              </td>
+              <td style={{ padding:'7px 12px', color:'#3B9CB5', fontSize:11 }}>{col.type}</td>
+              <td style={{ padding:'7px 12px', color:'rgba(248,250,252,0.6)', lineHeight:1.4 }}>{col.description}</td>
+              <td style={{ padding:'7px 12px', color:'rgba(248,250,252,0.4)', fontFamily:'monospace', fontSize:11 }}>{col.example}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   )
 }
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
 export default function CompIngestionPage() {
-  const [step, setStep]         = useState<Step>('type')
   const [compType, setCompType] = useState<CompType>('sale')
-  const [csvRows, setCsvRows]   = useState<Record<string,string>[]>([])
-  const [csvHeaders, setCsvHeaders] = useState<string[]>([])
-  const [mapping, setMapping]   = useState<Record<string,string>>({})
-  const [importing, setImporting] = useState(false)
-  const [result, setResult]     = useState<{inserted:number;skipped:number;errors:string[]}|null>(null)
-  const [dragOver, setDragOver] = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
+  const [step, setStep] = useState<Step>('type')
+  const [headers, setHeaders] = useState<string[]>([])
+  const [rows, setRows] = useState<string[][]>([])
+  const [mapping, setMapping] = useState<Record<string,string>>({})
+  const [loading, setLoading] = useState(false)
+  const [result, setResult] = useState<{ inserted:number; skipped:number; errors:string[] }|null>(null)
 
-  const aliasMap = compType==='sale' ? SALE_ALIASES : compType==='rent_building' ? RENT_BLDG_ALIASES : RENT_UNIT_ALIASES
-  const schema   = compType==='sale' ? SALE_SCHEMA  : compType==='rent_building' ? RENT_BLDG_SCHEMA  : RENT_UNIT_SCHEMA
-  const schemaKeys = schema.map(c=>c.key as string)
-  const requiredKeys = schema.filter(c=>c.required).map(c=>c.key as string)
-  const mappedKeys = Object.values(mapping)
-  const missingRequired = requiredKeys.filter(k=>!mappedKeys.includes(k))
+  const cols = compType==='sale' ? SALE_COLS : compType==='rent_building' ? RENT_BLDG_COLS : RENT_UNIT_COLS
+
+  const downloadSample = () => {
+    const blob = new Blob([sampleCSV(compType)],{type:'text/csv'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href=url; a.download=`sample_${compType}_comps.csv`; a.click()
+    URL.revokeObjectURL(url)
+  }
 
   const handleFile = useCallback((file: File) => {
     const reader = new FileReader()
     reader.onload = e => {
-      const rows = parseCsv(e.target?.result as string)
-      if (rows.length > 0) {
-        const headers = Object.keys(rows[0])
-        setCsvHeaders(headers); setCsvRows(rows)
-        setMapping(autoMap(headers, aliasMap))
-        setStep('map')
-      }
+      const { headers:hdrs, rows:rws } = parseCSV(e.target?.result as string)
+      setHeaders(hdrs); setRows(rws); setMapping(autoMap(hdrs, cols)); setStep('map')
     }
     reader.readAsText(file)
-  }, [aliasMap])
+  }, [cols])
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
-    e.preventDefault(); setDragOver(false)
-    const f = e.dataTransfer.files[0]
-    if (f?.name.endsWith('.csv')) handleFile(f)
-  }, [handleFile])
-
-  const buildRow = (csvRow: Record<string,string>): Record<string,unknown> => {
-    const row: Record<string,unknown> = {}
-    for (const [csvCol, schemaKey] of Object.entries(mapping)) {
-      const val = csvRow[csvCol]
-      if (!val) continue
-      const col = schema.find(c=>c.key===schemaKey)
-      if (!col) continue
-      if (col.type==='number') row[schemaKey] = parseNum(val)
-      else if (col.type==='date') row[schemaKey] = parseDate(val)
-      else row[schemaKey] = val
-    }
-    return row
-  }
-
-  const runImport = async () => {
-    setImporting(true)
-    const { data: td } = await supabase.from('teams').select('id').limit(1).single()
-    const teamId = td?.id
+  const doImport = async () => {
+    setLoading(true)
+    const { data: teamData } = await supabase.from('teams').select('id').limit(1).single()
+    const teamId = teamData?.id
     let inserted=0, skipped=0; const errors: string[] = []
-
-    if (compType==='sale') {
-      for (const csvRow of csvRows) {
-        const row = buildRow(csvRow)
-        // Auto-derive price_per_unit / price_per_sqft
-        const price = row.sale_price as number|null
-        const units = row.units as number|null
-        const sqft  = row.sqft as number|null
-        if (price && units && !row.price_per_unit) row.price_per_unit = Math.round(price/units)
-        if (price && sqft  && !row.price_per_sqft) row.price_per_sqft = parseFloat((price/sqft).toFixed(2))
-        row.team_id = teamId; row.comp_type = 'sale'
-        if (!row.address || !row.sale_price) { skipped++; continue }
-        const { error } = await supabase.from('comparables').insert(row)
-        if (error) { errors.push(`${row.address}: ${error.message}`); skipped++ } else inserted++
-      }
-    } else if (compType==='rent_building') {
-      for (const csvRow of csvRows) {
-        const row = buildRow(csvRow)
-        row.team_id = teamId; row.comp_type = 'rent'
-        if (!row.address) { skipped++; continue }
-        const { error } = await supabase.from('comparables').insert(row)
-        if (error) { errors.push(`${row.address}: ${error.message}`); skipped++ } else inserted++
-      }
-    } else {
-      // rent_unit: auto-link to parent building
-      for (const csvRow of csvRows) {
-        const row = buildRow(csvRow)
-        if (!row.building_address || !row.asking_rent) { skipped++; continue }
-        // Auto-calc rent/sqft
-        const rent = row.asking_rent as number
-        const sqft = row.sqft as number|null
-        if (rent && sqft && !row.rent_per_sqft) row.rent_per_sqft = parseFloat((rent/sqft).toFixed(2))
-        // Find parent
-        const { data: parent } = await supabase.from('comparables')
-          .select('id').ilike('address',`%${row.building_address}%`).limit(1).single()
-        row.parent_comp_id = parent?.id ?? null
-        row.team_id = teamId; row.comp_type = 'rent_unit'
-        let error: {message:string}|null = null
-        try {
-          const res = await supabase.from('comparable_units').insert(row)
-          error = res.error
-        } catch(e) {
-          error = { message: 'comparable_units table not yet created — run phase3_revisions.sql' }
+    for (const row of rows) {
+      const get = (k: string) => getVal(row,headers,mapping,k)
+      try {
+        if (compType==='sale') {
+          const addr=get('address'); if (!addr) { skipped++; continue }
+          const sp=parseFloat(get('sale_price').replace(/[^0-9.]/g,''))||null
+          const u=parseInt(get('units'))||null, sf=parseInt(get('sqft'))||null
+          const { error } = await supabase.from('comparables').insert({
+            team_id:teamId, comp_type:'sale', address:addr, city:get('city')||null, state:get('state')||null,
+            zip_code:get('zip_code')||null, sale_price:sp, close_date:get('close_date')||null, units:u, sqft:sf,
+            lot_sqft:parseInt(get('lot_sqft'))||null, year_built:parseInt(get('year_built'))||null,
+            cap_rate:parseFloat(get('cap_rate'))||null, grm:parseFloat(get('grm'))||null,
+            noi:parseFloat(get('noi').replace(/[^0-9.]/g,''))||null,
+            price_per_unit:sp&&u?Math.round(sp/u):(parseFloat(get('price_per_unit').replace(/[^0-9.]/g,''))||null),
+            price_per_sqft:sp&&sf?Math.round(sp/sf):(parseFloat(get('price_per_sqft').replace(/[^0-9.]/g,''))||null),
+            source:get('source')||'CSV Import',
+          })
+          if (error) { errors.push(`${addr}: ${error.message}`); skipped++ } else inserted++
+        } else if (compType==='rent_building') {
+          const addr=get('address'); if (!addr) { skipped++; continue }
+          const { error } = await supabase.from('comparables').insert({
+            team_id:teamId, comp_type:'rent', address:addr, city:get('city')||null, state:get('state')||null,
+            zip_code:get('zip_code')||null, units:parseInt(get('units'))||null,
+            year_built:parseInt(get('year_built'))||null, sqft:parseInt(get('sqft'))||null,
+            occupancy_pct:parseFloat(get('occupancy_pct'))||null,
+            avg_rent:parseFloat(get('avg_rent').replace(/[^0-9.]/g,''))||null,
+            effective_gross:parseFloat(get('effective_gross').replace(/[^0-9.]/g,''))||null,
+            parking:get('parking')||null, amenities:get('amenities')||null, source:get('source')||'CSV Import',
+          })
+          if (error) { errors.push(`${addr}: ${error.message}`); skipped++ } else inserted++
+        } else {
+          const pa=get('parent_address'); if (!pa) { skipped++; continue }
+          const { data:parent } = await supabase.from('comparables').select('id').ilike('address',`%${pa}%`).eq('comp_type','rent').limit(1).single()
+          if (!parent) { errors.push(`Unit: parent "${pa}" not found — import building first`); skipped++; continue }
+          const { error } = await supabase.from('comparable_units').insert({
+            parent_comp_id:parent.id, unit_type:get('unit_type')||'Unknown',
+            unit_sqft:parseInt(get('unit_sqft'))||null,
+            asking_rent:parseFloat(get('asking_rent').replace(/[^0-9.]/g,''))||null,
+            effective_rent:parseFloat(get('effective_rent').replace(/[^0-9.]/g,''))||null,
+            beds:parseInt(get('beds'))||null, baths:parseFloat(get('baths'))||null,
+            unit_count:parseInt(get('unit_count'))||null, concessions:get('concessions')||null,
+            lease_term:get('lease_term')||null, date_surveyed:get('date_surveyed')||null,
+            furnished:get('furnished')==='true', source:get('source')||'CSV Import',
+          })
+          if (error) { errors.push(`Unit row: ${error.message}`); skipped++ } else inserted++
         }
-        if (error) { errors.push(`Unit at ${row.building_address}: ${error.message}`); skipped++ } else inserted++
-      }
+      } catch (e: unknown) { errors.push(String(e)); skipped++ }
     }
-
-    setResult({ inserted, skipped, errors })
-    setImporting(false); setStep('done')
+    setResult({ inserted, skipped, errors }); setStep('done'); setLoading(false)
   }
 
-  const STEPS: {key:Step;label:string}[] = [
-    {key:'type',label:'1. Type'},{key:'schema',label:'2. Schema'},{key:'upload',label:'3. Upload'},
-    {key:'map',label:'4. Map'},{key:'preview',label:'5. Preview'},{key:'done',label:'6. Done'},
-  ]
-  const stepIdx = STEPS.findIndex(s=>s.key===step)
+  const STEPS: Step[] = ['type','schema','upload','map','preview','done']
+  const STEP_LABELS = ['Type','Schema','Upload','Map','Preview','Done']
 
-  const reset = () => { setStep('type'); setCsvRows([]); setCsvHeaders([]); setMapping({}); setResult(null) }
+  const btnPrimary: React.CSSProperties = { background:'rgba(197,150,58,0.2)', border:'1px solid rgba(197,150,58,0.4)', color:'#C5963A', borderRadius:4, padding:'9px 24px', fontSize:13, cursor:'pointer', fontWeight:600 }
+  const btnSecondary: React.CSSProperties = { background:'rgba(248,250,252,0.05)', border:'1px solid rgba(248,250,252,0.1)', color:'rgba(248,250,252,0.5)', borderRadius:4, padding:'9px 20px', fontSize:13, cursor:'pointer' }
 
   return (
-    <div className="flex flex-col h-full" style={{ backgroundColor:'#0F172A' }}>
-      {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0" style={{ borderColor:'rgba(197,150,58,0.15)' }}>
-        <div>
-          <h1 className="text-base font-semibold" style={{ color:'#F8FAFC' }}>Comp Ingestion</h1>
-          <p className="text-xs mt-0.5" style={{ color:'rgba(248,250,252,0.4)' }}>Import sale comps or rent comps from CoStar, LoopNet, MLS, or any CSV</p>
-        </div>
-        <div className="flex items-center gap-2">
-          <button onClick={()=>dlCsv(genSampleCsv(compType),`sample_${compType}_comps.csv`)}
-            className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-            style={{ color:'#3B9CB5',border:'1px solid rgba(59,156,181,0.3)',backgroundColor:'rgba(59,156,181,0.06)' }}>
-            <Download size={12}/> Sample CSV
-          </button>
-          <button onClick={reset} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-            style={{ color:'rgba(248,250,252,0.4)',border:'1px solid rgba(248,250,252,0.1)' }}>
-            <RefreshCw size={12}/> Reset
-          </button>
-        </div>
-      </div>
-
-      {/* Progress */}
-      <div className="flex items-center px-6 py-2 border-b flex-shrink-0" style={{ borderColor:'rgba(248,250,252,0.06)' }}>
-        {STEPS.map((s,i)=>(
-          <div key={s.key} className="flex items-center">
-            <div className="flex items-center gap-1.5 px-3 py-2 text-xs cursor-pointer"
-              style={{ color:i<=stepIdx?'#F8FAFC':'rgba(248,250,252,0.3)', borderBottom:s.key===step?'2px solid #C5963A':'2px solid transparent', backgroundColor:s.key===step?'rgba(197,150,58,0.08)':'transparent' }}
-              onClick={()=>i<stepIdx&&setStep(s.key)}>
-              {i<stepIdx?<CheckCircle size={10} style={{ color:'#22c55e' }}/>:<span style={{ color:i===stepIdx?'#C5963A':'rgba(248,250,252,0.3)' }}>{i+1}</span>}
-              <span className="ml-1">{s.label}</span>
-            </div>
-            {i<STEPS.length-1&&<ChevronRight size={11} style={{ color:'rgba(248,250,252,0.15)' }}/>}
+    <div style={{ padding:24, maxWidth:1100, margin:'0 auto' }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:24 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          <FileText size={22} color="#C5963A" />
+          <div>
+            <div style={{ fontSize:20, fontWeight:800, color:'#F8FAFC' }}>Comp Ingestion</div>
+            <div style={{ fontSize:12, color:'rgba(248,250,252,0.4)' }}>Import sale comps or rent comps from CSV</div>
           </div>
-        ))}
+        </div>
+        <button onClick={downloadSample} style={{ display:'flex', alignItems:'center', gap:6, background:'rgba(248,250,252,0.06)', border:'1px solid rgba(248,250,252,0.12)', color:'rgba(248,250,252,0.7)', borderRadius:4, padding:'7px 14px', fontSize:12, cursor:'pointer', fontWeight:600 }}>
+          <Download size={13} /> Sample CSV
+        </button>
       </div>
 
-      <div className="flex-1 overflow-y-auto px-6 py-5">
+      <div style={{ display:'flex', gap:4, marginBottom:28 }}>
+        {STEP_LABELS.map((label,i) => {
+          const key=STEPS[i], idx=STEPS.indexOf(step), active=key===step, done=idx>i
+          return <div key={key} style={{ flex:1, textAlign:'center', padding:'7px 0', borderRadius:4, fontSize:11, fontWeight:600, background:active?'rgba(197,150,58,0.2)':done?'rgba(34,197,94,0.1)':'rgba(248,250,252,0.04)', color:active?'#C5963A':done?'#22c55e':'rgba(248,250,252,0.3)', border:`1px solid ${active?'rgba(197,150,58,0.4)':done?'rgba(34,197,94,0.3)':'rgba(248,250,252,0.07)'}` }}>{done?'✓ ':''}{label}</div>
+        })}
+      </div>
 
-        {/* Step 1: Type */}
-        {step==='type' && (
-          <div className="max-w-2xl">
-            <div className="text-sm font-semibold mb-1" style={{ color:'#F8FAFC' }}>What type of comps are you importing?</div>
-            <div className="text-xs mb-5" style={{ color:'rgba(248,250,252,0.4)' }}>
-              For rent comps: import buildings first, then units. Units auto-link to their parent building by address.
-            </div>
-            <div className="grid grid-cols-3 gap-4 mb-5">
-              {[
-                {key:'sale' as CompType, icon:<DollarSign size={20}/>, label:'Sale Comps', desc:'Closed sales from CoStar, LoopNet, MLS'},
-                {key:'rent_building' as CompType, icon:<Building2 size={20}/>, label:'Rent Comp Buildings', desc:'Building-level parent records'},
-                {key:'rent_unit' as CompType, icon:<Home size={20}/>, label:'Rent Comp Units', desc:'Unit-level data linked to buildings'},
-              ].map(opt=>(
-                <div key={opt.key} className="p-4 cursor-pointer transition-all"
-                  style={{ backgroundColor:compType===opt.key?'rgba(197,150,58,0.1)':'rgba(27,42,74,0.5)', border:compType===opt.key?'2px solid #C5963A':'2px solid rgba(248,250,252,0.08)' }}
-                  onClick={()=>setCompType(opt.key)}>
-                  <div className="mb-2" style={{ color:compType===opt.key?'#C5963A':'rgba(248,250,252,0.4)' }}>{opt.icon}</div>
-                  <div className="text-sm font-semibold mb-1" style={{ color:'#F8FAFC' }}>{opt.label}</div>
-                  <div className="text-xs" style={{ color:'rgba(248,250,252,0.4)' }}>{opt.desc}</div>
-                </div>
-              ))}
-            </div>
-            {(compType==='rent_building'||compType==='rent_unit') && (
-              <div className="mb-5 p-3" style={{ backgroundColor:'rgba(59,156,181,0.08)',border:'1px solid rgba(59,156,181,0.2)' }}>
-                <div className="flex items-start gap-2">
-                  <Link2 size={13} style={{ color:'#3B9CB5',flexShrink:0,marginTop:1 }}/>
-                  <div>
-                    <div className="text-xs font-semibold mb-1" style={{ color:'#3B9CB5' }}>Relational Model</div>
-                    <div className="text-xs" style={{ color:'rgba(248,250,252,0.5)' }}>
-                      Buildings → <code style={{ color:'#3B9CB5' }}>comparables</code> (comp_type='rent').
-                      Units → <code style={{ color:'#3B9CB5' }}>comparable_units</code> linked via parent_comp_id.
-                      Import buildings first, then units — the importer auto-matches by address.
-                    </div>
-                  </div>
-                </div>
+      {step==='type' && (
+        <div>
+          <div style={{ fontSize:14, fontWeight:700, color:'#F8FAFC', marginBottom:16 }}>What type of comp are you importing?</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr 1fr', gap:14, marginBottom:24 }}>
+            {([
+              { key:'sale' as CompType,          label:'Sale Comp',            desc:'Closed multifamily sales — price, cap rate, GRM, NOI', icon:'🏢', cols:16 },
+              { key:'rent_building' as CompType, label:'Rent Comp — Building', desc:'Building-level rent survey data (parent record)',       icon:'🏗️', cols:13 },
+              { key:'rent_unit' as CompType,     label:'Rent Comp — Unit',     desc:'Unit-type rent data linked to a parent building',      icon:'🏠', cols:13 },
+            ]).map(opt=>(
+              <div key={opt.key} onClick={()=>setCompType(opt.key)} style={{ padding:20, borderRadius:8, cursor:'pointer', transition:'all 0.15s', background:compType===opt.key?'rgba(197,150,58,0.12)':'rgba(27,42,74,0.4)', border:`2px solid ${compType===opt.key?'rgba(197,150,58,0.5)':'rgba(248,250,252,0.08)'}` }}>
+                <div style={{ fontSize:28, marginBottom:10 }}>{opt.icon}</div>
+                <div style={{ fontSize:13, fontWeight:700, color:'#F8FAFC', marginBottom:6 }}>{opt.label}</div>
+                <div style={{ fontSize:11, color:'rgba(248,250,252,0.5)', lineHeight:1.5, marginBottom:10 }}>{opt.desc}</div>
+                <div style={{ fontSize:10, color:'rgba(248,250,252,0.3)' }}>{opt.cols} columns</div>
               </div>
-            )}
-            <button onClick={()=>setStep('schema')} className="flex items-center gap-2 px-5 py-2.5 text-xs font-semibold" style={{ backgroundColor:'#C5963A',color:'#0F172A' }}>
-              Continue <ArrowRight size={12}/>
+            ))}
+          </div>
+          {compType==='rent_unit' && (
+            <div style={{ background:'rgba(59,156,181,0.1)', border:'1px solid rgba(59,156,181,0.25)', borderRadius:6, padding:14, marginBottom:20, display:'flex', gap:10 }}>
+              <Info size={16} color="#3B9CB5" style={{ flexShrink:0, marginTop:1 }} />
+              <div style={{ fontSize:12, color:'rgba(248,250,252,0.7)', lineHeight:1.6 }}>
+                <strong style={{ color:'#3B9CB5' }}>Relational Import:</strong> Unit rows reference a parent building via the <code style={{ color:'#C5963A' }}>parent_address</code> column. The parent building must already exist in the database. Import the Rent Comp Building file first, then import units.
+              </div>
+            </div>
+          )}
+          <button onClick={()=>setStep('schema')} style={btnPrimary}>View Schema &amp; Continue →</button>
+        </div>
+      )}
+
+      {step==='schema' && (
+        <div>
+          <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+            <div style={{ fontSize:14, fontWeight:700, color:'#F8FAFC' }}>
+              {compType==='sale'?'Sale Comp':compType==='rent_building'?'Rent Comp Building':'Rent Comp Unit'} — Column Reference ({cols.length} columns)
+            </div>
+            <button onClick={downloadSample} style={{ display:'flex', alignItems:'center', gap:6, background:'rgba(197,150,58,0.1)', border:'1px solid rgba(197,150,58,0.3)', color:'#C5963A', borderRadius:4, padding:'5px 12px', fontSize:11, cursor:'pointer' }}>
+              <Download size={12} /> Download Sample CSV
             </button>
           </div>
-        )}
+          <div style={{ background:'#1B2A4A', border:'1px solid rgba(248,250,252,0.08)', borderRadius:8, overflow:'hidden', marginBottom:20 }}>
+            <SchemaTable cols={cols} />
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={()=>setStep('type')} style={btnSecondary}>← Back</button>
+            <button onClick={()=>setStep('upload')} style={btnPrimary}>Upload CSV →</button>
+          </div>
+        </div>
+      )}
 
-        {/* Step 2: Schema */}
-        {step==='schema' && (
-          <div className="max-w-4xl">
-            <div className="flex items-center justify-between mb-4">
-              <div>
-                <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>
-                  {compType==='sale'?'Sale Comp':compType==='rent_building'?'Rent Comp Building':'Rent Comp Unit'} — Column Schema
-                </div>
-                <div className="text-xs mt-0.5" style={{ color:'rgba(248,250,252,0.4)' }}>
-                  Column names don't need to match exactly — common aliases from CoStar, LoopNet, and MLS are auto-detected.
-                </div>
+      {step==='upload' && (
+        <div>
+          <div style={{ fontSize:14, fontWeight:700, color:'#F8FAFC', marginBottom:16 }}>Upload Your CSV File</div>
+          <div onDrop={e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f)handleFile(f)}} onDragOver={e=>e.preventDefault()}
+            style={{ border:'2px dashed rgba(197,150,58,0.3)', borderRadius:8, padding:60, textAlign:'center', cursor:'pointer', marginBottom:16 }}
+            onClick={()=>document.getElementById('comp-csv-upload')?.click()}>
+            <Upload size={36} color="rgba(197,150,58,0.5)" style={{ margin:'0 auto 14px' }} />
+            <div style={{ color:'#F8FAFC', fontSize:14, fontWeight:600, marginBottom:6 }}>Drop CSV here or click to browse</div>
+            <div style={{ color:'rgba(248,250,252,0.4)', fontSize:12 }}>Accepts .csv from CoStar, LoopNet, MLS, or your own format</div>
+            <input id="comp-csv-upload" type="file" accept=".csv" style={{ display:'none' }} onChange={e=>{const f=e.target.files?.[0];if(f)handleFile(f)}} />
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={()=>setStep('schema')} style={btnSecondary}>← Back</button>
+            <button onClick={downloadSample} style={{ display:'flex', alignItems:'center', gap:6, background:'rgba(248,250,252,0.06)', border:'1px solid rgba(248,250,252,0.12)', color:'rgba(248,250,252,0.6)', borderRadius:4, padding:'9px 16px', fontSize:12, cursor:'pointer' }}>
+              <Download size={13} /> Download Sample CSV Instead
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step==='map' && (
+        <div>
+          <div style={{ fontSize:14, fontWeight:700, color:'#F8FAFC', marginBottom:6 }}>Map Your Columns</div>
+          <div style={{ fontSize:12, color:'rgba(248,250,252,0.5)', marginBottom:16 }}>{headers.length} columns detected. Auto-matched fields are pre-filled.</div>
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:12, marginBottom:20 }}>
+            {cols.map(col=>(
+              <div key={col.key}>
+                <label style={L}>{col.label}{col.required&&<span style={{ color:'#ef4444', marginLeft:4 }}>*</span>} <span style={{ color:'rgba(248,250,252,0.25)', fontWeight:400 }}>({col.type})</span></label>
+                <select style={{ ...S, cursor:'pointer' }} value={mapping[col.key]||''} onChange={e=>setMapping(m=>({...m,[col.key]:e.target.value}))}>
+                  <option value="">— skip —</option>
+                  {headers.map(h=><option key={h} value={h}>{h}</option>)}
+                </select>
+                {mapping[col.key]&&<div style={{ fontSize:10, color:'#22c55e', marginTop:2 }}>✓ Mapped to "{mapping[col.key]}"</div>}
+                {!mapping[col.key]&&col.required&&<div style={{ fontSize:10, color:'#ef4444', marginTop:2 }}>⚠ Required — please map this column</div>}
               </div>
-              <button onClick={()=>dlCsv(genSampleCsv(compType),`sample_${compType}_comps.csv`)}
-                className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-                style={{ color:'#3B9CB5',border:'1px solid rgba(59,156,181,0.3)',backgroundColor:'rgba(59,156,181,0.06)' }}>
-                <Download size={12}/> Download Sample CSV
-              </button>
+            ))}
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={()=>setStep('upload')} style={btnSecondary}>← Back</button>
+            <button onClick={()=>setStep('preview')} style={btnPrimary}>Preview {rows.length} Rows →</button>
+          </div>
+        </div>
+      )}
+
+      {step==='preview' && (
+        <div>
+          <div style={{ fontSize:14, fontWeight:700, color:'#F8FAFC', marginBottom:6 }}>Preview — First 8 Rows</div>
+          <div style={{ fontSize:12, color:'rgba(248,250,252,0.5)', marginBottom:16 }}>Review the mapped data before importing to Supabase.</div>
+          <div style={{ background:'#1B2A4A', border:'1px solid rgba(248,250,252,0.08)', borderRadius:8, overflow:'auto', marginBottom:20, maxHeight:360 }}>
+            <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+              <thead>
+                <tr style={{ background:'rgba(15,23,42,0.8)', position:'sticky', top:0 }}>
+                  {cols.filter(c=>mapping[c.key]).map(c=>(
+                    <th key={c.key} style={{ padding:'8px 10px', textAlign:'left', ...L, fontWeight:700, whiteSpace:'nowrap' }}>{c.label}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {rows.slice(0,8).map((row,i)=>(
+                  <tr key={i} style={{ borderTop:'1px solid rgba(248,250,252,0.05)' }}>
+                    {cols.filter(c=>mapping[c.key]).map(c=>{
+                      const v=getVal(row,headers,mapping,c.key)
+                      return <td key={c.key} style={{ padding:'7px 10px', color:v?'#F8FAFC':'rgba(248,250,252,0.2)', whiteSpace:'nowrap' }}>{v||'—'}</td>
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ display:'flex', gap:8 }}>
+            <button onClick={()=>setStep('map')} style={btnSecondary}>← Back</button>
+            <button onClick={doImport} disabled={loading} style={{ flex:1, display:'flex', alignItems:'center', justifyContent:'center', gap:8, ...btnPrimary, padding:'9px 0' }}>
+              {loading?<><Loader2 size={14} style={{ animation:'spin 1s linear infinite' }} /> Importing {rows.length} rows...</>:`Import ${rows.length} Rows to Supabase →`}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {step==='done' && result && (
+        <div style={{ textAlign:'center', padding:'40px 0' }}>
+          <CheckCircle size={48} color="#22c55e" style={{ margin:'0 auto 16px' }} />
+          <div style={{ fontSize:22, fontWeight:800, color:'#F8FAFC', marginBottom:8 }}>Import Complete</div>
+          <div style={{ display:'flex', gap:16, justifyContent:'center', marginBottom:24 }}>
+            <div style={{ background:'rgba(34,197,94,0.1)', border:'1px solid rgba(34,197,94,0.2)', borderRadius:6, padding:'12px 24px' }}>
+              <div style={{ fontSize:28, fontWeight:800, color:'#22c55e' }}>{result.inserted}</div>
+              <div style={{ fontSize:11, color:'rgba(248,250,252,0.4)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Imported</div>
             </div>
-            <div className="border mb-4" style={{ border:'1px solid rgba(248,250,252,0.08)' }}>
-              <SchemaPanel type={compType}/>
-            </div>
-            <div className="flex items-center gap-3">
-              <button onClick={()=>setStep('type')} className="px-4 py-2 text-xs" style={{ color:'rgba(248,250,252,0.4)',border:'1px solid rgba(248,250,252,0.1)' }}>Back</button>
-              <button onClick={()=>setStep('upload')} className="flex items-center gap-2 px-5 py-2 text-xs font-semibold" style={{ backgroundColor:'#C5963A',color:'#0F172A' }}>
-                Upload CSV <ArrowRight size={12}/>
-              </button>
+            <div style={{ background:'rgba(248,250,252,0.05)', border:'1px solid rgba(248,250,252,0.1)', borderRadius:6, padding:'12px 24px' }}>
+              <div style={{ fontSize:28, fontWeight:800, color:'rgba(248,250,252,0.5)' }}>{result.skipped}</div>
+              <div style={{ fontSize:11, color:'rgba(248,250,252,0.4)', textTransform:'uppercase', letterSpacing:'0.06em' }}>Skipped</div>
             </div>
           </div>
-        )}
-
-        {/* Step 3: Upload */}
-        {step==='upload' && (
-          <div className="max-w-xl">
-            <div className="text-sm font-semibold mb-4" style={{ color:'#F8FAFC' }}>Upload your CSV file</div>
-            <div className="flex flex-col items-center justify-center py-16 cursor-pointer transition-all"
-              style={{ border:`2px dashed ${dragOver?'#C5963A':'rgba(197,150,58,0.25)'}`, backgroundColor:dragOver?'rgba(197,150,58,0.05)':'rgba(27,42,74,0.3)' }}
-              onDragOver={e=>{e.preventDefault();setDragOver(true)}} onDragLeave={()=>setDragOver(false)}
-              onDrop={handleDrop} onClick={()=>fileRef.current?.click()}>
-              <Upload size={36} style={{ color:dragOver?'#C5963A':'rgba(197,150,58,0.4)' }}/>
-              <div className="mt-3 text-sm font-medium" style={{ color:dragOver?'#C5963A':'rgba(248,250,252,0.5)' }}>
-                {dragOver?'Drop to upload':'Drop CSV here or click to browse'}
+          {result.errors.length>0 && (
+            <div style={{ background:'rgba(239,68,68,0.08)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:6, padding:16, textAlign:'left', maxWidth:600, margin:'0 auto 20px', maxHeight:200, overflowY:'auto' }}>
+              <div style={{ fontSize:11, color:'#ef4444', fontWeight:700, marginBottom:8, display:'flex', alignItems:'center', gap:6 }}>
+                <AlertCircle size={13} /> {result.errors.length} Error{result.errors.length>1?'s':''}
               </div>
-              <div className="mt-1 text-xs" style={{ color:'rgba(248,250,252,0.3)' }}>Accepts .csv from CoStar, LoopNet, MLS, or any spreadsheet</div>
-              <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e=>e.target.files?.[0]&&handleFile(e.target.files[0])}/>
+              {result.errors.map((e,i)=><div key={i} style={{ fontSize:11, color:'rgba(248,250,252,0.5)', marginBottom:4, paddingLeft:8, borderLeft:'2px solid rgba(239,68,68,0.3)' }}>{e}</div>)}
             </div>
-            <div className="mt-4">
-              <button onClick={()=>setStep('schema')} className="px-4 py-2 text-xs" style={{ color:'rgba(248,250,252,0.4)',border:'1px solid rgba(248,250,252,0.1)' }}>Back</button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 4: Map */}
-        {step==='map' && (
-          <div className="max-w-4xl">
-            <div className="flex items-center justify-between mb-3">
-              <div>
-                <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Map CSV Columns to Schema Fields</div>
-                <div className="text-xs mt-0.5" style={{ color:'rgba(248,250,252,0.4)' }}>
-                  {csvRows.length} rows · {Object.keys(mapping).length}/{csvHeaders.length} columns auto-mapped
-                </div>
-              </div>
-              {missingRequired.length>0 && (
-                <div className="flex items-center gap-1.5 px-3 py-1.5" style={{ backgroundColor:'rgba(239,68,68,0.1)',border:'1px solid rgba(239,68,68,0.2)' }}>
-                  <AlertCircle size={12} style={{ color:'#ef4444' }}/>
-                  <span className="text-xs" style={{ color:'#ef4444' }}>Missing: {missingRequired.join(', ')}</span>
-                </div>
-              )}
-            </div>
-            <div className="border mb-4 overflow-x-auto" style={{ border:'1px solid rgba(248,250,252,0.08)' }}>
-              <table className="w-full text-xs">
-                <thead><tr style={{ backgroundColor:'rgba(27,42,74,0.8)' }}>
-                  {['CSV Column','Auto-Detected','Map To Field',''].map(h=>(
-                    <th key={h} className="px-3 py-2 text-left font-semibold" style={{ color:'#C5963A',fontSize:'9px',textTransform:'uppercase' }}>{h}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {csvHeaders.map(h=>(
-                    <tr key={h} style={{ borderBottom:'1px solid rgba(248,250,252,0.04)' }}>
-                      <td className="px-3 py-2 font-mono" style={{ color:'#F8FAFC',fontSize:'10px' }}>{h}</td>
-                      <td className="px-3 py-2">
-                        {mapping[h]
-                          ? <span className="flex items-center gap-1"><CheckCircle size={10} style={{ color:'#22c55e' }}/><span style={{ color:'#22c55e' }}>→ {mapping[h]}</span></span>
-                          : <span style={{ color:'rgba(248,250,252,0.25)' }}>—</span>}
-                      </td>
-                      <td className="px-3 py-2">
-                        <select className="text-xs px-2 py-1 w-40" value={mapping[h]??''}
-                          onChange={e=>{const m={...mapping};if(e.target.value)m[h]=e.target.value;else delete m[h];setMapping(m)}}>
-                          <option value="">— Skip —</option>
-                          {schemaKeys.map(k=><option key={k} value={k}>{k}</option>)}
-                        </select>
-                      </td>
-                      <td className="px-3 py-2">
-                        {mapping[h]&&<button onClick={()=>{const m={...mapping};delete m[h];setMapping(m)}} style={{ color:'rgba(248,250,252,0.3)' }}><X size={12}/></button>}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex items-center gap-3">
-              <button onClick={()=>setStep('upload')} className="px-4 py-2 text-xs" style={{ color:'rgba(248,250,252,0.4)',border:'1px solid rgba(248,250,252,0.1)' }}>Back</button>
-              <button onClick={()=>setStep('preview')} disabled={missingRequired.length>0}
-                className="flex items-center gap-2 px-5 py-2 text-xs font-semibold"
-                style={{ backgroundColor:missingRequired.length===0?'#C5963A':'rgba(197,150,58,0.3)',color:'#0F172A' }}>
-                Preview <ArrowRight size={12}/>
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 5: Preview */}
-        {step==='preview' && (
-          <div className="max-w-5xl">
-            <div className="text-sm font-semibold mb-1" style={{ color:'#F8FAFC' }}>Preview — {csvRows.length} records</div>
-            <div className="text-xs mb-3" style={{ color:'rgba(248,250,252,0.4)' }}>Showing first 10 rows after mapping.</div>
-            <div className="overflow-x-auto border mb-4" style={{ border:'1px solid rgba(248,250,252,0.08)' }}>
-              <table className="text-xs" style={{ minWidth:'800px' }}>
-                <thead><tr style={{ backgroundColor:'rgba(27,42,74,0.8)' }}>
-                  <th className="px-3 py-2 text-left" style={{ color:'rgba(248,250,252,0.3)',fontSize:'9px' }}>#</th>
-                  {Object.values(mapping).map(k=>(
-                    <th key={k} className="px-3 py-2 text-left font-semibold" style={{ color:'#C5963A',fontSize:'9px',textTransform:'uppercase' }}>{k}</th>
-                  ))}
-                </tr></thead>
-                <tbody>
-                  {csvRows.slice(0,10).map((row,i)=>{
-                    const mapped = buildRow(row)
-                    return (
-                      <tr key={i} style={{ borderBottom:'1px solid rgba(248,250,252,0.04)' }}>
-                        <td className="px-3 py-2" style={{ color:'rgba(248,250,252,0.3)' }}>{i+1}</td>
-                        {Object.values(mapping).map(k=>(
-                          <td key={k} className="px-3 py-2" style={{ color:mapped[k]!=null?'#F8FAFC':'rgba(248,250,252,0.2)' }}>
-                            {mapped[k]!=null?String(mapped[k]):'—'}
-                          </td>
-                        ))}
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-            <div className="flex items-center gap-3">
-              <button onClick={()=>setStep('map')} className="px-4 py-2 text-xs" style={{ color:'rgba(248,250,252,0.4)',border:'1px solid rgba(248,250,252,0.1)' }}>Back</button>
-              <button onClick={runImport} disabled={importing}
-                className="flex items-center gap-2 px-5 py-2 text-xs font-semibold" style={{ backgroundColor:'#C5963A',color:'#0F172A' }}>
-                {importing?<><RefreshCw size={11} className="animate-spin"/> Importing...</>:<>Import {csvRows.length} Records <ArrowRight size={12}/></>}
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 6: Done */}
-        {step==='done' && result && (
-          <div className="max-w-xl">
-            <div className="p-6 text-center" style={{ backgroundColor:'rgba(27,42,74,0.5)',border:'1px solid rgba(197,150,58,0.2)' }}>
-              <CheckCircle size={40} className="mx-auto mb-3" style={{ color:'#22c55e' }}/>
-              <div className="text-sm font-semibold mb-1" style={{ color:'#F8FAFC' }}>Import Complete</div>
-              <div className="text-xs mb-4" style={{ color:'rgba(248,250,252,0.4)' }}>{result.inserted} inserted · {result.skipped} skipped</div>
-              {result.errors.length>0 && (
-                <div className="text-left mb-4 p-3" style={{ backgroundColor:'rgba(239,68,68,0.08)',border:'1px solid rgba(239,68,68,0.2)' }}>
-                  <div className="text-xs font-semibold mb-2" style={{ color:'#ef4444' }}>Errors ({result.errors.length})</div>
-                  {result.errors.slice(0,5).map((e,i)=><div key={i} className="text-xs mb-1" style={{ color:'rgba(248,250,252,0.5)' }}>{e}</div>)}
-                </div>
-              )}
-              <button onClick={reset} className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold mx-auto" style={{ backgroundColor:'#C5963A',color:'#0F172A' }}>
-                <Plus size={11}/> Import More
-              </button>
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+          <button onClick={()=>{ setStep('type'); setRows([]); setHeaders([]); setMapping({}); setResult(null) }} style={btnPrimary}>
+            Import Another File
+          </button>
+        </div>
+      )}
     </div>
   )
 }

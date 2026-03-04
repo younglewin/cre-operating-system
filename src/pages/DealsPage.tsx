@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import {
   Plus, X, DollarSign, Building2, User, Calendar, ChevronRight,
   TrendingUp, Target, Edit2, Trash2, RefreshCw, MoreHorizontal,
@@ -231,6 +231,27 @@ function AddDealModal({ onClose, onAdd, contacts, properties }: {
     notes: '',
   })
   const [saving, setSaving] = useState(false)
+  const [suggestedContacts, setSuggestedContacts] = useState<Contact[]>([])
+
+  // When a property is selected, auto-suggest contacts linked to it
+  const fetchSuggestions = useCallback(async (propertyId: string) => {
+    if (!propertyId) { setSuggestedContacts([]); return }
+    // Look for contacts linked to this property via contact_properties junction table
+    const { data } = await supabase
+      .from('contact_properties')
+      .select('contact_id, relationship, contacts(id, first_name, last_name, contact_type, company)')
+      .eq('property_id', propertyId)
+      .limit(8)
+    if (data && data.length > 0) {
+      const linked = data.map((row: { contact_id: string; relationship: string; contacts: unknown }) => ({
+        ...(row.contacts as Contact),
+        _relationship: row.relationship,
+      }))
+      setSuggestedContacts(linked as Contact[])
+    } else {
+      setSuggestedContacts([])
+    }
+  }, [])
 
   const save = async () => {
     if (!form.title) return
@@ -315,18 +336,49 @@ function AddDealModal({ onClose, onAdd, contacts, properties }: {
           {/* Contact / Property */}
           <div className="flex gap-3">
             <div className="flex-1">
-              <label className="block text-xs mb-1" style={{ color: 'rgba(248,250,252,0.4)', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Contact</label>
-              <ContactPicker contacts={contacts} value={form.contact_id} onChange={id => setForm(f => ({ ...f, contact_id: id }))}/>
-            </div>
-            <div className="flex-1">
               <label className="block text-xs mb-1" style={{ color: 'rgba(248,250,252,0.4)', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Property</label>
-              <select className="w-full px-2 py-1.5 text-xs border-none outline-none" style={{ backgroundColor: 'rgba(248,250,252,0.08)', color: '#F8FAFC' }}
-                value={form.property_id} onChange={e => setForm(f => ({ ...f, property_id: e.target.value }))}>
+              <select className="w-full px-2 py-1.5 text-xs border-none outline-none" style={{ backgroundColor: 'rgba(248,250,252,0.08)', color: '#F8FAFC', cursor: 'pointer' }}
+                value={form.property_id} onChange={e => { setForm(f => ({ ...f, property_id: e.target.value })); fetchSuggestions(e.target.value) }}>
                 <option value="">— Select Property —</option>
                 {properties.map(p => <option key={p.id} value={p.id}>{p.name}</option>)}
               </select>
             </div>
+            <div className="flex-1">
+              <label className="block text-xs mb-1" style={{ color: 'rgba(248,250,252,0.4)', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Contact</label>
+              <ContactPicker contacts={contacts} value={form.contact_id} onChange={id => setForm(f => ({ ...f, contact_id: id }))}/>
+            </div>
           </div>
+          {/* Smart Contact Suggestions */}
+          {suggestedContacts.length > 0 && (
+            <div style={{ backgroundColor: 'rgba(197,150,58,0.07)', border: '1px solid rgba(197,150,58,0.25)', padding: '8px 10px' }}>
+              <div className="text-xs font-semibold mb-1.5" style={{ color: '#C5963A', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>★ Contacts Linked to This Property</div>
+              <div className="flex flex-wrap gap-1.5">
+                {suggestedContacts.map(c => (
+                  <button key={c.id}
+                    onClick={() => setForm(f => ({ ...f, contact_id: c.id }))}
+                    className="flex items-center gap-1.5 px-2 py-1 text-xs transition-all"
+                    style={{
+                      backgroundColor: form.contact_id === c.id ? 'rgba(197,150,58,0.25)' : 'rgba(248,250,252,0.06)',
+                      border: `1px solid ${form.contact_id === c.id ? 'rgba(197,150,58,0.5)' : 'rgba(248,250,252,0.1)'}`,
+                      color: form.contact_id === c.id ? '#C5963A' : 'rgba(248,250,252,0.7)',
+                      cursor: 'pointer',
+                    }}>
+                    <div className="w-4 h-4 flex items-center justify-center text-xs font-bold flex-shrink-0"
+                      style={{ backgroundColor: 'rgba(197,150,58,0.2)', color: '#C5963A', fontSize: '8px' }}>
+                      {c.first_name?.[0]}{c.last_name?.[0]}
+                    </div>
+                    <span>{c.first_name} {c.last_name}</span>
+                    {(c as Contact & { _relationship?: string })._relationship && (
+                      <span style={{ fontSize: '9px', color: 'rgba(248,250,252,0.4)', background: 'rgba(248,250,252,0.06)', padding: '0 4px', borderRadius: 2 }}>
+                        {(c as Contact & { _relationship?: string })._relationship}
+                      </span>
+                    )}
+                    {form.contact_id === c.id && <span style={{ fontSize: '9px', color: '#22c55e' }}>✓</span>}
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           {/* Notes */}
           <div>
             <label className="block text-xs mb-1" style={{ color: 'rgba(248,250,252,0.4)', fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.08em' }}>Notes</label>

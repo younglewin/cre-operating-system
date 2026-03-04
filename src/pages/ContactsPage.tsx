@@ -1,844 +1,827 @@
-import { useState, useEffect, useRef } from 'react'
-import {
-  Users, Plus, Search, X, Phone, Mail, MapPin, Building2,
-  Tag, Edit3, Trash2, Save, RefreshCw, Upload, Copy,
-  Zap, CheckCircle, Briefcase, ArrowRight
-} from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../lib/supabase'
+import {
+  Users, Plus, Search, Phone, Mail, MapPin, Building2,
+  Upload, Download, Loader2, CheckCircle, Star
+} from 'lucide-react'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
-type PhoneType   = 'Mobile' | 'Landline' | 'Work' | 'Home' | 'Fax'
-type EmailType   = 'Work' | 'Personal' | 'Other'
-type AddrType    = 'Mailing' | 'Property' | 'Office' | 'Home'
-type FieldStatus = 'Primary' | 'Good' | 'Bad' | 'Unknown'
-
-interface PhoneEntry   { value: string; type: PhoneType;  status: FieldStatus }
-interface EmailEntry   { value: string; type: EmailType;  status: FieldStatus }
-interface AddressEntry { street: string; city: string; state: string; zip: string; type: AddrType; status: FieldStatus }
-interface LinkedProperty {
-  id?: string; address: string; city?: string; state?: string
-  zip_code?: string; apn?: string; relationship: string; notes?: string
-}
+type PhoneEntry   = { value: string; type: string; status: string }
+type EmailEntry   = { value: string; type: string; status: string }
+type AddressEntry = { value: string; city: string; state: string; zip: string; type: string; status: string }
+type LinkedProperty = { id?: string; address: string; city?: string; state?: string; zip_code?: string; apn?: string; relationship: string; notes?: string; is_db_property?: boolean }
+type DBProperty   = { id: string; address: string; city?: string; state?: string; zip_code?: string }
 
 interface Contact {
-  id: string
-  first_name: string
-  last_name: string
-  company?: string
-  contact_type: string
-  lead_status: string
-  lead_source?: string
-  phone?: string
-  email?: string
-  phones?: PhoneEntry[]
-  emails?: EmailEntry[]
-  addresses?: AddressEntry[]
-  tags?: string[]
-  notes?: string
-  created_at: string
-  linked_properties?: LinkedProperty[]
-  active_deals?: { id: string; title: string; stage: string; value?: number }[]
+  id: string; first_name: string; last_name: string; company?: string
+  contact_type?: string; status?: string; city?: string; state?: string; zip_code?: string
+  phone?: string; email?: string; phones?: PhoneEntry[]; emails?: EmailEntry[]
+  addresses?: AddressEntry[]; tags?: string[]; notes?: string; created_at?: string
 }
 
 // ─── Constants ────────────────────────────────────────────────────────────────
-const CONTACT_TYPES  = ['Buyer','Seller','Broker','Investor','Lender','Attorney','Tenant','Vendor','Other']
-const LEAD_STATUSES  = ['New','Contacted','Qualified','Negotiating','Closed','Dead']
-const LEAD_SOURCES   = ['Direct','Referral','Zillow','LoopNet','CoStar','Facebook','Google','Cold Call','Email Campaign','Postcard','Zapier','Other']
-const PHONE_TYPES: PhoneType[]   = ['Mobile','Landline','Work','Home','Fax']
-const EMAIL_TYPES: EmailType[]   = ['Work','Personal','Other']
-const ADDR_TYPES: AddrType[]     = ['Mailing','Property','Office','Home']
-const FIELD_STATUSES: FieldStatus[] = ['Primary','Good','Bad','Unknown']
-const RELATIONSHIPS  = ['Owner','Buyer','Seller','Tenant','Guarantor','Heir','LLC Member','Trust Beneficiary','Other']
+const CONTACT_TYPES  = ['Buyer','Seller','Broker','Lender','Attorney','Investor','Tenant','Vendor','Other']
+const PHONE_TYPES    = ['Mobile','Landline','Work','Home','Other']
+const EMAIL_TYPES    = ['Work','Personal','Other']
+const ADDRESS_TYPES  = ['Mailing','Property','Office','Other']
+const FIELD_STATUSES = ['Primary','Good','Bad','Unknown']
+const RELATIONSHIP_TYPES = ['Owner','Buyer','Tenant','Guarantor','Investor','LLC Member','Trust Beneficiary','Other']
 
-const TYPE_COLORS: Record<string,string> = {
-  Buyer:'#3B9CB5', Seller:'#C5963A', Broker:'#8B5CF6', Investor:'#22c55e',
-  Lender:'#F59E0B', Attorney:'#EC4899', Tenant:'#6366F1', Vendor:'#94A3B8', Other:'#64748B',
+const S: React.CSSProperties = { background:'rgba(27,42,74,0.6)', border:'1px solid rgba(248,250,252,0.1)', color:'#F8FAFC', borderRadius:4, padding:'6px 10px', width:'100%', fontSize:13 }
+const L: React.CSSProperties = { color:'rgba(248,250,252,0.4)', fontSize:'9px', textTransform:'uppercase', letterSpacing:'0.08em', display:'block', marginBottom:4 }
+
+const TYPE_COLORS: Record<string,string> = { Buyer:'#3B9CB5', Seller:'#C5963A', Broker:'#8b5cf6', Lender:'#22c55e', Attorney:'#f59e0b', Investor:'#1B2A4A', Tenant:'#64748b', Vendor:'#ec4899', Other:'#475569' }
+const STATUS_COLORS: Record<string,string> = { Active:'#22c55e', Inactive:'#64748b', Lead:'#C5963A', 'Do Not Contact':'#ef4444' }
+
+function getPhone(c: Contact) { return c.phones?.[0]?.value || c.phone || '' }
+function getEmail(c: Contact) { return c.emails?.[0]?.value || c.email || '' }
+
+// ─── Badges ───────────────────────────────────────────────────────────────────
+function TypeBadge({ type }: { type?: string }) {
+  const c = TYPE_COLORS[type||'Other']||'#475569'
+  return <span style={{ background:`${c}22`, color:c, border:`1px solid ${c}44`, borderRadius:3, padding:'1px 7px', fontSize:10, fontWeight:600 }}>{type||'Other'}</span>
 }
-const STATUS_COLORS: Record<string,string> = {
-  New:'#3B9CB5', Contacted:'#C5963A', Qualified:'#22c55e',
-  Negotiating:'#8B5CF6', Closed:'#22c55e', Dead:'#64748B',
-}
-
-// ─── Helpers ──────────────────────────────────────────────────────────────────
-const emptyPhone    = (): PhoneEntry   => ({ value:'', type:'Mobile',  status:'Unknown' })
-const emptyEmail    = (): EmailEntry   => ({ value:'', type:'Work',    status:'Unknown' })
-const emptyAddress  = (): AddressEntry => ({ street:'', city:'', state:'CA', zip:'', type:'Mailing', status:'Unknown' })
-const emptyLinked   = (): LinkedProperty => ({ address:'', city:'', state:'CA', zip_code:'', apn:'', relationship:'Owner' })
-
-function StatusDot({ status }: { status: string }) {
-  const c: Record<string,string> = { Primary:'#22c55e', Good:'#3B9CB5', Bad:'#ef4444', Unknown:'#94A3B8' }
-  return <span className="inline-block w-2 h-2 rounded-full flex-shrink-0" style={{ backgroundColor: c[status] ?? '#94A3B8' }} />
+function StatusBadge({ status }: { status?: string }) {
+  const c = STATUS_COLORS[status||'Active']||'#64748b'
+  return <span style={{ background:`${c}22`, color:c, border:`1px solid ${c}44`, borderRadius:3, padding:'1px 7px', fontSize:10, fontWeight:600 }}>{status||'Active'}</span>
 }
 
-function parseCsvFile(text: string): Record<string,string>[] {
-  const lines = text.split(/\r?\n/).filter(l => l.trim())
-  if (lines.length < 2) return []
-  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/[^a-z0-9_]/g,'_'))
-  return lines.slice(1).map(line => {
-    const vals = line.split(',')
-    const row: Record<string,string> = {}
-    headers.forEach((h,i) => { row[h] = (vals[i]??'').trim() })
-    return row
-  }).filter(r => Object.values(r).some(v => v))
-}
-
-// ─── Multi-Value Row ──────────────────────────────────────────────────────────
-function FieldRow<T extends { type: string; status: string }>({
-  entry, typeOptions, onUpdate, onRemove, children
-}: {
-  entry: T; typeOptions: string[]
-  onUpdate: (u: Partial<T>) => void; onRemove: () => void
-  children: React.ReactNode
-}) {
+// ─── PhoneArray ───────────────────────────────────────────────────────────────
+function PhoneArray({ phones, onChange }: { phones: PhoneEntry[]; onChange: (v: PhoneEntry[]) => void }) {
+  const add = () => onChange([...phones, { value:'', type:'Mobile', status:'Primary' }])
+  const rm  = (i: number) => onChange(phones.filter((_,idx) => idx!==i))
+  const up  = (i: number, f: string, v: string) => onChange(phones.map((p,idx) => idx===i ? {...p,[f]:v} : p))
   return (
-    <div className="flex items-center gap-2 mb-1.5">
-      <StatusDot status={entry.status} />
-      <div className="flex-1">{children}</div>
-      <select className="text-xs px-2 py-1 w-24" value={entry.type} onChange={e => onUpdate({ type: e.target.value } as Partial<T>)}>
-        {typeOptions.map(t => <option key={t} value={t}>{t}</option>)}
-      </select>
-      <select className="text-xs px-2 py-1 w-24" value={entry.status} onChange={e => onUpdate({ status: e.target.value } as Partial<T>)}>
-        {FIELD_STATUSES.map(s => <option key={s} value={s}>{s}</option>)}
-      </select>
-      <button onClick={onRemove} className="p-1" style={{ color:'rgba(248,250,252,0.3)' }}><X size={12}/></button>
+    <div>
+      {phones.map((p,i) => (
+        <div key={i} style={{ display:'flex', gap:6, marginBottom:6, alignItems:'center' }}>
+          <input style={{ ...S, flex:2 }} placeholder="Phone number" value={p.value} onChange={e=>up(i,'value',e.target.value)} />
+          <select style={{ ...S, flex:1, cursor:'pointer' }} value={p.type} onChange={e=>up(i,'type',e.target.value)}>
+            {PHONE_TYPES.map(t=><option key={t}>{t}</option>)}
+          </select>
+          <select style={{ ...S, flex:1, cursor:'pointer' }} value={p.status} onChange={e=>up(i,'status',e.target.value)}>
+            {FIELD_STATUSES.map(s=><option key={s}>{s}</option>)}
+          </select>
+          <button onClick={()=>rm(i)} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:18, padding:'0 4px', lineHeight:1 }}>×</button>
+        </div>
+      ))}
+      <button onClick={add} style={{ background:'none', border:'1px dashed rgba(248,250,252,0.2)', color:'rgba(248,250,252,0.5)', borderRadius:4, padding:'4px 12px', fontSize:11, cursor:'pointer', width:'100%' }}>+ Add Phone</button>
     </div>
   )
 }
 
-// ─── Contact Form ─────────────────────────────────────────────────────────────
-function ContactForm({ initial, onSave, onCancel }: {
-  initial?: Partial<Contact>; onSave: (d: Partial<Contact>) => Promise<void>; onCancel: () => void
+// ─── EmailArray ───────────────────────────────────────────────────────────────
+function EmailArray({ emails, onChange }: { emails: EmailEntry[]; onChange: (v: EmailEntry[]) => void }) {
+  const add = () => onChange([...emails, { value:'', type:'Work', status:'Primary' }])
+  const rm  = (i: number) => onChange(emails.filter((_,idx) => idx!==i))
+  const up  = (i: number, f: string, v: string) => onChange(emails.map((e,idx) => idx===i ? {...e,[f]:v} : e))
+  return (
+    <div>
+      {emails.map((e,i) => (
+        <div key={i} style={{ display:'flex', gap:6, marginBottom:6, alignItems:'center' }}>
+          <input style={{ ...S, flex:3 }} placeholder="Email address" type="email" value={e.value} onChange={ev=>up(i,'value',ev.target.value)} />
+          <select style={{ ...S, flex:1, cursor:'pointer' }} value={e.type} onChange={ev=>up(i,'type',ev.target.value)}>
+            {EMAIL_TYPES.map(t=><option key={t}>{t}</option>)}
+          </select>
+          <select style={{ ...S, flex:1, cursor:'pointer' }} value={e.status} onChange={ev=>up(i,'status',ev.target.value)}>
+            {FIELD_STATUSES.map(s=><option key={s}>{s}</option>)}
+          </select>
+          <button onClick={()=>rm(i)} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:18, padding:'0 4px', lineHeight:1 }}>×</button>
+        </div>
+      ))}
+      <button onClick={add} style={{ background:'none', border:'1px dashed rgba(248,250,252,0.2)', color:'rgba(248,250,252,0.5)', borderRadius:4, padding:'4px 12px', fontSize:11, cursor:'pointer', width:'100%' }}>+ Add Email</button>
+    </div>
+  )
+}
+
+// ─── AddressArray ─────────────────────────────────────────────────────────────
+function AddressArray({ addresses, onChange }: { addresses: AddressEntry[]; onChange: (v: AddressEntry[]) => void }) {
+  const add = () => onChange([...addresses, { value:'', city:'', state:'CA', zip:'', type:'Mailing', status:'Primary' }])
+  const rm  = (i: number) => onChange(addresses.filter((_,idx) => idx!==i))
+  const up  = (i: number, f: string, v: string) => onChange(addresses.map((a,idx) => idx===i ? {...a,[f]:v} : a))
+  return (
+    <div>
+      {addresses.map((a,i) => (
+        <div key={i} style={{ border:'1px solid rgba(248,250,252,0.08)', borderRadius:6, padding:10, marginBottom:8 }}>
+          <div style={{ display:'flex', gap:6, marginBottom:6 }}>
+            <input style={{ ...S, flex:3 }} placeholder="Street address" value={a.value} onChange={e=>up(i,'value',e.target.value)} />
+            <select style={{ ...S, flex:1, cursor:'pointer' }} value={a.type} onChange={e=>up(i,'type',e.target.value)}>
+              {ADDRESS_TYPES.map(t=><option key={t}>{t}</option>)}
+            </select>
+            <select style={{ ...S, flex:1, cursor:'pointer' }} value={a.status} onChange={e=>up(i,'status',e.target.value)}>
+              {FIELD_STATUSES.map(s=><option key={s}>{s}</option>)}
+            </select>
+            <button onClick={()=>rm(i)} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:18, padding:'0 4px', lineHeight:1 }}>×</button>
+          </div>
+          <div style={{ display:'flex', gap:6 }}>
+            <input style={{ ...S, flex:2 }} placeholder="City" value={a.city} onChange={e=>up(i,'city',e.target.value)} />
+            <input style={{ ...S, flex:1 }} placeholder="State" value={a.state} onChange={e=>up(i,'state',e.target.value)} />
+            <input style={{ ...S, flex:1 }} placeholder="ZIP" value={a.zip} onChange={e=>up(i,'zip',e.target.value)} />
+          </div>
+        </div>
+      ))}
+      <button onClick={add} style={{ background:'none', border:'1px dashed rgba(248,250,252,0.2)', color:'rgba(248,250,252,0.5)', borderRadius:4, padding:'4px 12px', fontSize:11, cursor:'pointer', width:'100%' }}>+ Add Address</button>
+    </div>
+  )
+}
+
+// ─── PropertyLinker ───────────────────────────────────────────────────────────
+function PropertyLinker({ linked, onChange, dbProperties, autoSuggestions }: {
+  linked: LinkedProperty[]; onChange: (v: LinkedProperty[]) => void
+  dbProperties: DBProperty[]; autoSuggestions: DBProperty[]
 }) {
-  const [form, setForm] = useState<Partial<Contact>>({
-    first_name:'', last_name:'', company:'', contact_type:'Buyer',
-    lead_status:'New', lead_source:'Direct', notes:'', tags:[],
-    phones:[emptyPhone()], emails:[emptyEmail()], addresses:[], linked_properties:[],
-    ...initial,
-  })
-  const [saving, setSaving]   = useState(false)
-  const [tagInput, setTagInput] = useState('')
-  const [propSearch, setPropSearch] = useState('')
-  const [propResults, setPropResults] = useState<{id:string;address:string;city:string}[]>([])
-  const [autoResults, setAutoResults] = useState<{id:string;address:string;city:string}[]>([])
-  const [autoLoading, setAutoLoading] = useState(false)
-  const [tab, setTab] = useState<'basic'|'contact'|'address'|'properties'|'notes'>('basic')
+  const [search, setSearch] = useState('')
+  const [showDrop, setShowDrop] = useState(false)
+  const [addingNew, setAddingNew] = useState(false)
+  const [newP, setNewP] = useState<LinkedProperty>({ address:'', city:'', state:'CA', zip_code:'', apn:'', relationship:'Owner' })
 
-  const set = (k: keyof Contact, v: unknown) => setForm(f => ({ ...f, [k]: v }))
+  const filtered = dbProperties.filter(p =>
+    p.address.toLowerCase().includes(search.toLowerCase()) ||
+    (p.city||'').toLowerCase().includes(search.toLowerCase())
+  ).slice(0,8)
 
-  const updatePhone = (i: number, u: Partial<PhoneEntry>) =>
-    set('phones', (form.phones??[]).map((p,idx) => idx===i ? {...p,...u} : p))
-  const removePhone = (i: number) => set('phones', (form.phones??[]).filter((_,idx) => idx!==i))
-
-  const updateEmail = (i: number, u: Partial<EmailEntry>) =>
-    set('emails', (form.emails??[]).map((e,idx) => idx===i ? {...e,...u} : e))
-  const removeEmail = (i: number) => set('emails', (form.emails??[]).filter((_,idx) => idx!==i))
-
-  const updateAddr = (i: number, u: Partial<AddressEntry>) =>
-    set('addresses', (form.addresses??[]).map((a,idx) => idx===i ? {...a,...u} : a))
-  const removeAddr = (i: number) => set('addresses', (form.addresses??[]).filter((_,idx) => idx!==i))
-
-  const updateProp = (i: number, u: Partial<LinkedProperty>) =>
-    set('linked_properties', (form.linked_properties??[]).map((p,idx) => idx===i ? {...p,...u} : p))
-  const removeProp = (i: number) => set('linked_properties', (form.linked_properties??[]).filter((_,idx) => idx!==i))
-
-  const searchProps = async (q: string) => {
-    if (!q || q.length < 2) { setPropResults([]); return }
-    const { data } = await supabase.from('properties').select('id,address,city').ilike('address',`%${q}%`).limit(8)
-    setPropResults(data ?? [])
+  const linkDB = (p: DBProperty) => {
+    if (linked.find(l=>l.id===p.id)) return
+    onChange([...linked, { id:p.id, address:p.address, city:p.city, state:p.state, zip_code:p.zip_code, relationship:'Owner', is_db_property:true }])
+    setSearch(''); setShowDrop(false)
   }
-
-  const runAutoSuggest = async () => {
-    setAutoLoading(true)
-    const name = `${form.first_name??''} ${form.last_name??''}`.trim()
-    const { data } = await supabase.from('properties').select('id,address,city')
-      .or(`owner_name.ilike.%${name}%,mailing_address.ilike.%${name}%`).limit(10)
-    setAutoResults(data ?? [])
-    setAutoLoading(false)
+  const addNew = () => {
+    if (!newP.address.trim()) return
+    onChange([...linked, { ...newP }])
+    setNewP({ address:'', city:'', state:'CA', zip_code:'', apn:'', relationship:'Owner' })
+    setAddingNew(false)
   }
-
-  const addLinked = (p: {id:string;address:string;city:string}) => {
-    if (!(form.linked_properties??[]).some(x => x.id===p.id))
-      set('linked_properties', [...(form.linked_properties??[]), { id:p.id, address:p.address, city:p.city, state:'CA', relationship:'Owner' }])
-    setPropResults([]); setPropSearch('')
-  }
-
-  const addTag = () => {
-    const t = tagInput.trim().toLowerCase()
-    if (t && !(form.tags??[]).includes(t)) set('tags', [...(form.tags??[]), t])
-    setTagInput('')
-  }
-
-  const TABS = [
-    {key:'basic',label:'Basic Info'},{key:'contact',label:'Phone & Email'},
-    {key:'address',label:'Addresses'},{key:'properties',label:'Linked Properties'},{key:'notes',label:'Notes & Tags'},
-  ] as const
+  const rm = (i: number) => onChange(linked.filter((_,idx)=>idx!==i))
+  const upRel = (i: number, rel: string) => onChange(linked.map((l,idx)=>idx===i?{...l,relationship:rel}:l))
 
   return (
-    <div className="flex flex-col h-full">
-      {/* Tabs */}
-      <div className="flex border-b flex-shrink-0" style={{ borderColor:'rgba(197,150,58,0.15)' }}>
-        {TABS.map(t => (
-          <button key={t.key} onClick={() => setTab(t.key)}
-            className="px-4 py-2.5 text-xs font-medium transition-all"
-            style={{ color:tab===t.key?'#F8FAFC':'rgba(248,250,252,0.4)', borderBottom:tab===t.key?'2px solid #C5963A':'2px solid transparent', backgroundColor:tab===t.key?'rgba(197,150,58,0.05)':'transparent' }}>
-            {t.label}
-          </button>
-        ))}
-      </div>
+    <div>
+      {linked.map((p,i) => (
+        <div key={i} style={{ display:'flex', alignItems:'center', gap:8, background:'rgba(27,42,74,0.5)', border:'1px solid rgba(248,250,252,0.08)', borderRadius:4, padding:'6px 10px', marginBottom:6 }}>
+          <Building2 size={13} color={p.is_db_property?'#3B9CB5':'#C5963A'} />
+          <div style={{ flex:1, fontSize:12, color:'#F8FAFC' }}>{p.address}{p.city?`, ${p.city}`:''}</div>
+          <select style={{ ...S, width:120, fontSize:11, cursor:'pointer' }} value={p.relationship} onChange={e=>upRel(i,e.target.value)}>
+            {RELATIONSHIP_TYPES.map(r=><option key={r}>{r}</option>)}
+          </select>
+          <button onClick={()=>rm(i)} style={{ background:'none', border:'none', color:'#ef4444', cursor:'pointer', fontSize:18, padding:'0 2px', lineHeight:1 }}>×</button>
+        </div>
+      ))}
 
-      <div className="flex-1 overflow-y-auto px-5 py-4">
-        {/* Basic */}
-        {tab==='basic' && (
-          <div className="space-y-3">
-            <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs mb-1" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>First Name *</label>
-                <input className="w-full px-3 py-2 text-sm" value={form.first_name??''} onChange={e=>set('first_name',e.target.value)} placeholder="First" />
-              </div>
-              <div>
-                <label className="block text-xs mb-1" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Last Name</label>
-                <input className="w-full px-3 py-2 text-sm" value={form.last_name??''} onChange={e=>set('last_name',e.target.value)} placeholder="Last" />
-              </div>
-            </div>
-            <div>
-              <label className="block text-xs mb-1" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Company / Entity</label>
-              <input className="w-full px-3 py-2 text-sm" value={form.company??''} onChange={e=>set('company',e.target.value)} placeholder="Company, LLC, Trust..." />
-            </div>
-            <div className="grid grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs mb-1" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Type</label>
-                <select className="w-full px-3 py-2 text-sm" value={form.contact_type??'Buyer'} onChange={e=>set('contact_type',e.target.value)}>
-                  {CONTACT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs mb-1" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Status</label>
-                <select className="w-full px-3 py-2 text-sm" value={form.lead_status??'New'} onChange={e=>set('lead_status',e.target.value)}>
-                  {LEAD_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs mb-1" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Source</label>
-                <select className="w-full px-3 py-2 text-sm" value={form.lead_source??'Direct'} onChange={e=>set('lead_source',e.target.value)}>
-                  {LEAD_SOURCES.map(s=><option key={s} value={s}>{s}</option>)}
-                </select>
-              </div>
-            </div>
+      {autoSuggestions.length > 0 && (
+        <div style={{ background:'rgba(197,150,58,0.08)', border:'1px solid rgba(197,150,58,0.2)', borderRadius:6, padding:10, marginBottom:10 }}>
+          <div style={{ fontSize:10, color:'#C5963A', fontWeight:700, marginBottom:6, textTransform:'uppercase', letterSpacing:'0.06em' }}>
+            ★ Public Record Match — Properties with same owner name/address
           </div>
-        )}
-
-        {/* Phone & Email */}
-        {tab==='contact' && (
-          <div className="space-y-5">
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-semibold" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Phone Numbers</label>
-                <button onClick={()=>set('phones',[...(form.phones??[]),emptyPhone()])} className="flex items-center gap-1 text-xs" style={{ color:'#C5963A' }}>
-                  <Plus size={11}/> Add Phone
-                </button>
-              </div>
-              {(form.phones??[]).map((p,i) => (
-                <FieldRow key={i} entry={p} typeOptions={PHONE_TYPES} onUpdate={u=>updatePhone(i,u)} onRemove={()=>removePhone(i)}>
-                  <input className="w-full px-2 py-1 text-sm" value={p.value} onChange={e=>updatePhone(i,{value:e.target.value})} placeholder="(555) 000-0000" />
-                </FieldRow>
-              ))}
-              {(form.phones??[]).length===0 && <div className="text-xs py-2" style={{ color:'rgba(248,250,252,0.25)' }}>No phone numbers added</div>}
-            </div>
-            <div>
-              <div className="flex items-center justify-between mb-2">
-                <label className="text-xs font-semibold" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Email Addresses</label>
-                <button onClick={()=>set('emails',[...(form.emails??[]),emptyEmail()])} className="flex items-center gap-1 text-xs" style={{ color:'#C5963A' }}>
-                  <Plus size={11}/> Add Email
-                </button>
-              </div>
-              {(form.emails??[]).map((e,i) => (
-                <FieldRow key={i} entry={e} typeOptions={EMAIL_TYPES} onUpdate={u=>updateEmail(i,u)} onRemove={()=>removeEmail(i)}>
-                  <input className="w-full px-2 py-1 text-sm" value={e.value} onChange={ev=>updateEmail(i,{value:ev.target.value})} placeholder="email@example.com" type="email" />
-                </FieldRow>
-              ))}
-              {(form.emails??[]).length===0 && <div className="text-xs py-2" style={{ color:'rgba(248,250,252,0.25)' }}>No email addresses added</div>}
-            </div>
-          </div>
-        )}
-
-        {/* Addresses */}
-        {tab==='address' && (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <label className="text-xs font-semibold" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Mailing & Physical Addresses</label>
-              <button onClick={()=>set('addresses',[...(form.addresses??[]),emptyAddress()])} className="flex items-center gap-1 text-xs" style={{ color:'#C5963A' }}>
-                <Plus size={11}/> Add Address
+          {autoSuggestions.map(p => (
+            <div key={p.id} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:4 }}>
+              <span style={{ flex:1, fontSize:12, color:'#F8FAFC' }}>{p.address}{p.city?`, ${p.city}`:''}</span>
+              <button onClick={()=>linkDB(p)} disabled={!!linked.find(l=>l.id===p.id)}
+                style={{ background:linked.find(l=>l.id===p.id)?'rgba(34,197,94,0.15)':'rgba(197,150,58,0.2)', border:'none', color:linked.find(l=>l.id===p.id)?'#22c55e':'#C5963A', borderRadius:3, padding:'3px 10px', fontSize:11, cursor:'pointer' }}>
+                {linked.find(l=>l.id===p.id)?'✓ Linked':'+ Link'}
               </button>
             </div>
-            {(form.addresses??[]).map((a,i) => (
-              <div key={i} className="mb-3 p-3" style={{ backgroundColor:'rgba(27,42,74,0.5)',border:'1px solid rgba(248,250,252,0.06)' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <div className="flex items-center gap-2">
-                    <StatusDot status={a.status}/>
-                    <select className="text-xs px-2 py-1" style={{ backgroundColor:'rgba(197,150,58,0.1)',color:'#C5963A',border:'none' }} value={a.type} onChange={e=>updateAddr(i,{type:e.target.value as AddrType})}>
-                      {ADDR_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
-                    </select>
-                    <select className="text-xs px-2 py-1" style={{ backgroundColor:'rgba(248,250,252,0.06)',color:'rgba(248,250,252,0.6)',border:'none' }} value={a.status} onChange={e=>updateAddr(i,{status:e.target.value as FieldStatus})}>
-                      {FIELD_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
-                    </select>
-                  </div>
-                  <button onClick={()=>removeAddr(i)} style={{ color:'rgba(248,250,252,0.25)' }}><X size={12}/></button>
-                </div>
-                <input className="w-full px-2 py-1.5 text-sm mb-1.5" value={a.street} onChange={e=>updateAddr(i,{street:e.target.value})} placeholder="Street address" />
-                <div className="grid grid-cols-3 gap-1.5">
-                  <input className="px-2 py-1.5 text-sm" value={a.city} onChange={e=>updateAddr(i,{city:e.target.value})} placeholder="City" />
-                  <input className="px-2 py-1.5 text-sm" value={a.state} onChange={e=>updateAddr(i,{state:e.target.value})} placeholder="ST" maxLength={2} />
-                  <input className="px-2 py-1.5 text-sm" value={a.zip} onChange={e=>updateAddr(i,{zip:e.target.value})} placeholder="ZIP" maxLength={10} />
-                </div>
-              </div>
-            ))}
-            {(form.addresses??[]).length===0 && <div className="text-xs py-3" style={{ color:'rgba(248,250,252,0.25)' }}>No addresses added yet</div>}
-          </div>
-        )}
+          ))}
+        </div>
+      )}
 
-        {/* Linked Properties */}
-        {tab==='properties' && (
-          <div>
-            {/* Search DB */}
-            <div className="mb-4">
-              <label className="block text-xs font-semibold mb-2" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Search & Link Existing Properties</label>
-              <div className="relative">
-                <Search size={12} className="absolute left-2.5 top-2.5" style={{ color:'rgba(248,250,252,0.3)' }}/>
-                <input className="w-full pl-8 pr-3 py-2 text-sm" value={propSearch} onChange={e=>{setPropSearch(e.target.value);searchProps(e.target.value)}} placeholder="Search by address..." />
-                {propResults.length>0 && (
-                  <div className="absolute top-full left-0 right-0 z-10 shadow-lg" style={{ backgroundColor:'#1B2A4A',border:'1px solid rgba(197,150,58,0.3)' }}>
-                    {propResults.map(p=>(
-                      <button key={p.id} onClick={()=>addLinked(p)} className="w-full flex items-center gap-2 px-3 py-2 text-xs text-left" style={{ borderBottom:'1px solid rgba(248,250,252,0.04)' }}>
-                        <Building2 size={11} style={{ color:'#C5963A' }}/> <span style={{ color:'#F8FAFC' }}>{p.address}</span> <span style={{ color:'rgba(248,250,252,0.4)' }}>{p.city}</span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-            </div>
-
-            {/* Auto-Suggest */}
-            <div className="mb-4 p-3" style={{ backgroundColor:'rgba(59,156,181,0.08)',border:'1px solid rgba(59,156,181,0.2)' }}>
-              <div className="flex items-center justify-between mb-1">
-                <div className="text-xs font-semibold" style={{ color:'#3B9CB5' }}>Auto-Suggest (Public Record Match)</div>
-                <button onClick={runAutoSuggest} disabled={autoLoading||!form.first_name}
-                  className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold"
-                  style={{ backgroundColor:'rgba(59,156,181,0.2)',color:'#3B9CB5',border:'1px solid rgba(59,156,181,0.3)' }}>
-                  {autoLoading ? <RefreshCw size={11} className="animate-spin"/> : <Zap size={11}/>}
-                  {autoLoading ? 'Searching...' : 'Find by Name'}
-                </button>
-              </div>
-              <div className="text-xs" style={{ color:'rgba(248,250,252,0.4)' }}>Searches DB for properties owned by "{form.first_name} {form.last_name}"</div>
-              {autoResults.length>0 && (
-                <div className="mt-2 space-y-1">
-                  {autoResults.map(p=>(
-                    <div key={p.id} className="flex items-center justify-between px-2 py-1.5" style={{ backgroundColor:'rgba(27,42,74,0.6)' }}>
-                      <span className="text-xs" style={{ color:'#F8FAFC' }}>{p.address}, {p.city}</span>
-                      <button onClick={()=>addLinked(p)} className="text-xs px-2 py-0.5" style={{ backgroundColor:'rgba(59,156,181,0.2)',color:'#3B9CB5' }}>+ Link</button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-
-            {/* Manual list */}
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-semibold" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Linked Properties ({(form.linked_properties??[]).length})</label>
-              <button onClick={()=>set('linked_properties',[...(form.linked_properties??[]),emptyLinked()])} className="flex items-center gap-1 text-xs" style={{ color:'#C5963A' }}>
-                <Plus size={11}/> Add Manually
-              </button>
-            </div>
-            {(form.linked_properties??[]).map((p,i)=>(
-              <div key={i} className="mb-2 p-3" style={{ backgroundColor:'rgba(27,42,74,0.5)',border:'1px solid rgba(197,150,58,0.12)' }}>
-                <div className="flex items-center justify-between mb-2">
-                  <select className="text-xs px-2 py-1" style={{ backgroundColor:'rgba(197,150,58,0.1)',color:'#C5963A',border:'1px solid rgba(197,150,58,0.2)' }} value={p.relationship} onChange={e=>updateProp(i,{relationship:e.target.value})}>
-                    {RELATIONSHIPS.map(r=><option key={r} value={r}>{r}</option>)}
-                  </select>
-                  <button onClick={()=>removeProp(i)} style={{ color:'rgba(248,250,252,0.25)' }}><X size={12}/></button>
-                </div>
-                {p.id ? (
-                  <div className="text-xs" style={{ color:'#F8FAFC' }}>{p.address}, {p.city} <span style={{ color:'#22c55e',fontSize:'9px' }}>● Linked to DB</span></div>
-                ) : (
-                  <>
-                    <input className="w-full px-2 py-1.5 text-sm mb-1.5" value={p.address} onChange={e=>updateProp(i,{address:e.target.value})} placeholder="Street address" />
-                    <div className="grid grid-cols-3 gap-1.5 mb-1.5">
-                      <input className="px-2 py-1.5 text-sm" value={p.city??''} onChange={e=>updateProp(i,{city:e.target.value})} placeholder="City" />
-                      <input className="px-2 py-1.5 text-sm" value={p.state??'CA'} onChange={e=>updateProp(i,{state:e.target.value})} placeholder="ST" maxLength={2} />
-                      <input className="px-2 py-1.5 text-sm" value={p.zip_code??''} onChange={e=>updateProp(i,{zip_code:e.target.value})} placeholder="ZIP" />
-                    </div>
-                    <input className="w-full px-2 py-1.5 text-sm" value={p.apn??''} onChange={e=>updateProp(i,{apn:e.target.value})} placeholder="APN (optional)" />
-                  </>
-                )}
+      <div style={{ position:'relative', marginBottom:8 }}>
+        <input style={{ ...S, paddingLeft:30 }} placeholder="Search existing properties to link..."
+          value={search} onFocus={()=>setShowDrop(true)}
+          onChange={e=>{ setSearch(e.target.value); setShowDrop(true) }} />
+        <Search size={13} style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:'rgba(248,250,252,0.3)' }} />
+        {showDrop && search && filtered.length > 0 && (
+          <div style={{ position:'absolute', top:'100%', left:0, right:0, background:'#1B2A4A', border:'1px solid rgba(248,250,252,0.12)', borderRadius:4, zIndex:50, maxHeight:200, overflowY:'auto' }}>
+            {filtered.map(p => (
+              <div key={p.id} onClick={()=>linkDB(p)} style={{ padding:'8px 12px', cursor:'pointer', fontSize:12, borderBottom:'1px solid rgba(248,250,252,0.06)' }}
+                onMouseEnter={e=>(e.currentTarget.style.background='rgba(197,150,58,0.1)')}
+                onMouseLeave={e=>(e.currentTarget.style.background='transparent')}>
+                <div style={{ color:'#F8FAFC' }}>{p.address}</div>
+                {p.city && <div style={{ color:'rgba(248,250,252,0.4)', fontSize:11 }}>{p.city}, {p.state}</div>}
               </div>
             ))}
           </div>
         )}
-
-        {/* Notes & Tags */}
-        {tab==='notes' && (
-          <div className="space-y-4">
-            <div>
-              <label className="block text-xs mb-1" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Notes</label>
-              <textarea className="w-full px-3 py-2 text-sm" rows={5} value={form.notes??''} onChange={e=>set('notes',e.target.value)} placeholder="Investment criteria, preferences, history..." style={{ resize:'vertical' }} />
-            </div>
-            <div>
-              <label className="block text-xs mb-2" style={{ color:'rgba(248,250,252,0.5)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Tags</label>
-              <div className="flex flex-wrap gap-1.5 mb-2">
-                {(form.tags??[]).map(t=>(
-                  <span key={t} className="flex items-center gap-1 px-2 py-0.5 text-xs" style={{ backgroundColor:'rgba(197,150,58,0.15)',color:'#C5963A',border:'1px solid rgba(197,150,58,0.3)' }}>
-                    {t}<button onClick={()=>set('tags',(form.tags??[]).filter(x=>x!==t))} style={{ color:'rgba(197,150,58,0.6)' }}><X size={10}/></button>
-                  </span>
-                ))}
-              </div>
-              <div className="flex gap-2">
-                <input className="flex-1 px-3 py-1.5 text-sm" value={tagInput} onChange={e=>setTagInput(e.target.value)} onKeyDown={e=>{if(e.key==='Enter'){e.preventDefault();addTag()}}} placeholder="Add tag and press Enter..." />
-                <button onClick={addTag} className="px-3 py-1.5 text-xs" style={{ backgroundColor:'rgba(197,150,58,0.15)',color:'#C5963A',border:'1px solid rgba(197,150,58,0.3)' }}>Add</button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
 
-      {/* Footer */}
-      <div className="flex items-center justify-between px-5 py-3 border-t flex-shrink-0" style={{ borderColor:'rgba(197,150,58,0.15)' }}>
-        <button onClick={onCancel} className="px-4 py-2 text-xs" style={{ color:'rgba(248,250,252,0.4)',border:'1px solid rgba(248,250,252,0.1)' }}>Cancel</button>
-        <button onClick={async()=>{setSaving(true);await onSave(form);setSaving(false)}} disabled={saving||!form.first_name}
-          className="flex items-center gap-1.5 px-5 py-2 text-xs font-semibold" style={{ backgroundColor:'#C5963A',color:'#0F172A' }}>
-          {saving?<><RefreshCw size={11} className="animate-spin"/> Saving...</>:<><Save size={11}/> Save Contact</>}
+      {!addingNew ? (
+        <button onClick={()=>setAddingNew(true)} style={{ background:'none', border:'1px dashed rgba(248,250,252,0.2)', color:'rgba(248,250,252,0.5)', borderRadius:4, padding:'4px 12px', fontSize:11, cursor:'pointer', width:'100%' }}>
+          + Add New Property On-the-Fly
         </button>
-      </div>
+      ) : (
+        <div style={{ border:'1px solid rgba(197,150,58,0.3)', borderRadius:6, padding:10 }}>
+          <div style={{ fontSize:11, color:'#C5963A', fontWeight:600, marginBottom:8 }}>New Property</div>
+          <div style={{ display:'flex', gap:6, marginBottom:6 }}>
+            <input style={{ ...S, flex:2 }} placeholder="Street address *" value={newP.address} onChange={e=>setNewP(p=>({...p,address:e.target.value}))} />
+            <select style={{ ...S, flex:1, cursor:'pointer' }} value={newP.relationship} onChange={e=>setNewP(p=>({...p,relationship:e.target.value}))}>
+              {RELATIONSHIP_TYPES.map(r=><option key={r}>{r}</option>)}
+            </select>
+          </div>
+          <div style={{ display:'flex', gap:6, marginBottom:6 }}>
+            <input style={{ ...S, flex:2 }} placeholder="City" value={newP.city} onChange={e=>setNewP(p=>({...p,city:e.target.value}))} />
+            <input style={{ ...S, flex:1 }} placeholder="State" value={newP.state} onChange={e=>setNewP(p=>({...p,state:e.target.value}))} />
+            <input style={{ ...S, flex:1 }} placeholder="ZIP" value={newP.zip_code} onChange={e=>setNewP(p=>({...p,zip_code:e.target.value}))} />
+          </div>
+          <div style={{ display:'flex', gap:6, marginBottom:6 }}>
+            <input style={{ ...S, flex:1 }} placeholder="APN (optional)" value={newP.apn} onChange={e=>setNewP(p=>({...p,apn:e.target.value}))} />
+            <input style={{ ...S, flex:2 }} placeholder="Notes (optional)" value={newP.notes} onChange={e=>setNewP(p=>({...p,notes:e.target.value}))} />
+          </div>
+          <div style={{ display:'flex', gap:6 }}>
+            <button onClick={addNew} style={{ flex:1, background:'rgba(197,150,58,0.2)', border:'1px solid rgba(197,150,58,0.4)', color:'#C5963A', borderRadius:4, padding:'5px 0', fontSize:12, cursor:'pointer' }}>Add Property</button>
+            <button onClick={()=>setAddingNew(false)} style={{ flex:1, background:'rgba(248,250,252,0.05)', border:'1px solid rgba(248,250,252,0.1)', color:'rgba(248,250,252,0.5)', borderRadius:4, padding:'5px 0', fontSize:12, cursor:'pointer' }}>Cancel</button>
+          </div>
+        </div>
+      )}
     </div>
-  )
-}
-
-// ─── Contact Drawer ───────────────────────────────────────────────────────────
-function ContactDrawer({ contact, onClose, onEdit, onDelete }: {
-  contact: Contact; onClose: () => void; onEdit: () => void; onDelete: () => void
-}) {
-  const phones    = contact.phones ?? (contact.phone ? [{value:contact.phone,type:'Mobile' as PhoneType,status:'Unknown' as FieldStatus}] : [])
-  const emails    = contact.emails ?? (contact.email ? [{value:contact.email,type:'Work' as EmailType,status:'Unknown' as FieldStatus}] : [])
-  const addresses = contact.addresses ?? []
-
-  return (
-    <>
-      <div className="fixed inset-0 z-30" style={{ backgroundColor:'rgba(0,0,0,0.5)' }} onClick={onClose}/>
-      <div className="fixed right-0 top-0 h-full z-40 overflow-y-auto flex flex-col" style={{ width:'420px',backgroundColor:'#1B2A4A',borderLeft:'1px solid rgba(197,150,58,0.25)' }}>
-        {/* Header */}
-        <div className="flex items-start justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor:'rgba(197,150,58,0.2)' }}>
-          <div className="flex items-center gap-3">
-            <div className="w-10 h-10 flex items-center justify-center text-sm font-bold" style={{ backgroundColor:TYPE_COLORS[contact.contact_type]??'#64748B',color:'#0F172A' }}>
-              {contact.first_name?.[0]}{contact.last_name?.[0]}
-            </div>
-            <div>
-              <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>{contact.first_name} {contact.last_name}</div>
-              {contact.company && <div className="text-xs" style={{ color:'rgba(248,250,252,0.5)' }}>{contact.company}</div>}
-            </div>
-          </div>
-          <div className="flex items-center gap-1">
-            <button onClick={onEdit} className="p-1.5" style={{ color:'#C5963A' }}><Edit3 size={14}/></button>
-            <button onClick={onDelete} className="p-1.5" style={{ color:'#ef4444' }}><Trash2 size={14}/></button>
-            <button onClick={onClose} className="p-1.5" style={{ color:'rgba(248,250,252,0.4)' }}><X size={14}/></button>
-          </div>
-        </div>
-
-        {/* Badges */}
-        <div className="flex items-center gap-2 px-5 py-3 border-b flex-shrink-0" style={{ borderColor:'rgba(248,250,252,0.06)' }}>
-          <span className="px-2 py-0.5 text-xs font-semibold" style={{ backgroundColor:`${TYPE_COLORS[contact.contact_type]??'#64748B'}22`,color:TYPE_COLORS[contact.contact_type]??'#64748B' }}>{contact.contact_type}</span>
-          <span className="px-2 py-0.5 text-xs" style={{ backgroundColor:`${STATUS_COLORS[contact.lead_status]??'#64748B'}22`,color:STATUS_COLORS[contact.lead_status]??'#64748B' }}>{contact.lead_status}</span>
-          {contact.lead_source && <span className="px-2 py-0.5 text-xs" style={{ backgroundColor:'rgba(248,250,252,0.06)',color:'rgba(248,250,252,0.4)' }}>{contact.lead_source}</span>}
-        </div>
-
-        <div className="flex-1 overflow-y-auto px-5 py-4 space-y-5">
-          {phones.length>0 && (
-            <div>
-              <div className="text-xs font-semibold mb-2" style={{ color:'rgba(248,250,252,0.4)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Phone Numbers</div>
-              {phones.map((p,i)=>(
-                <div key={i} className="flex items-center gap-2 mb-1.5">
-                  <StatusDot status={p.status}/><Phone size={11} style={{ color:'rgba(248,250,252,0.3)' }}/>
-                  <span className="text-sm flex-1" style={{ color:'#F8FAFC' }}>{p.value}</span>
-                  <span className="text-xs px-1.5 py-0.5" style={{ backgroundColor:'rgba(248,250,252,0.06)',color:'rgba(248,250,252,0.4)',fontSize:'9px' }}>{p.type}</span>
-                  <button onClick={()=>navigator.clipboard.writeText(p.value)} className="p-1" style={{ color:'rgba(248,250,252,0.3)' }}><Copy size={10}/></button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {emails.length>0 && (
-            <div>
-              <div className="text-xs font-semibold mb-2" style={{ color:'rgba(248,250,252,0.4)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Email Addresses</div>
-              {emails.map((e,i)=>(
-                <div key={i} className="flex items-center gap-2 mb-1.5">
-                  <StatusDot status={e.status}/><Mail size={11} style={{ color:'rgba(248,250,252,0.3)' }}/>
-                  <span className="text-sm flex-1 truncate" style={{ color:'#F8FAFC' }}>{e.value}</span>
-                  <span className="text-xs px-1.5 py-0.5" style={{ backgroundColor:'rgba(248,250,252,0.06)',color:'rgba(248,250,252,0.4)',fontSize:'9px' }}>{e.type}</span>
-                  <button onClick={()=>navigator.clipboard.writeText(e.value)} className="p-1" style={{ color:'rgba(248,250,252,0.3)' }}><Copy size={10}/></button>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {addresses.length>0 && (
-            <div>
-              <div className="text-xs font-semibold mb-2" style={{ color:'rgba(248,250,252,0.4)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Addresses</div>
-              {addresses.map((a,i)=>(
-                <div key={i} className="flex items-start gap-2 mb-2 p-2" style={{ backgroundColor:'rgba(27,42,74,0.5)' }}>
-                  <StatusDot status={a.status}/><MapPin size={11} style={{ color:'rgba(248,250,252,0.3)',marginTop:2 }}/>
-                  <div className="flex-1">
-                    <div className="text-sm" style={{ color:'#F8FAFC' }}>{a.street}</div>
-                    <div className="text-xs" style={{ color:'rgba(248,250,252,0.5)' }}>{a.city}, {a.state} {a.zip}</div>
-                  </div>
-                  <span className="text-xs px-1.5 py-0.5" style={{ backgroundColor:'rgba(248,250,252,0.06)',color:'rgba(248,250,252,0.4)',fontSize:'9px' }}>{a.type}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {(contact.linked_properties??[]).length>0 && (
-            <div>
-              <div className="text-xs font-semibold mb-2" style={{ color:'rgba(248,250,252,0.4)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Linked Properties</div>
-              {(contact.linked_properties??[]).map((p,i)=>(
-                <div key={i} className="flex items-center gap-2 mb-1.5 p-2" style={{ backgroundColor:'rgba(197,150,58,0.06)',border:'1px solid rgba(197,150,58,0.12)' }}>
-                  <Building2 size={11} style={{ color:'#C5963A' }}/>
-                  <div className="flex-1"><div className="text-xs font-medium" style={{ color:'#F8FAFC' }}>{p.address}</div>{p.city&&<div className="text-xs" style={{ color:'rgba(248,250,252,0.4)' }}>{p.city}, {p.state}</div>}</div>
-                  <span className="text-xs px-1.5 py-0.5" style={{ backgroundColor:'rgba(197,150,58,0.15)',color:'#C5963A',fontSize:'9px' }}>{p.relationship}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {(contact.active_deals??[]).length>0 && (
-            <div>
-              <div className="text-xs font-semibold mb-2" style={{ color:'rgba(248,250,252,0.4)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Active Deals</div>
-              {(contact.active_deals??[]).map(d=>(
-                <div key={d.id} className="flex items-center gap-2 mb-1.5 p-2" style={{ backgroundColor:'rgba(59,156,181,0.06)',border:'1px solid rgba(59,156,181,0.12)' }}>
-                  <Briefcase size={11} style={{ color:'#3B9CB5' }}/><span className="text-xs flex-1" style={{ color:'#F8FAFC' }}>{d.title}</span>
-                  <span className="text-xs px-1.5 py-0.5" style={{ backgroundColor:'rgba(59,156,181,0.15)',color:'#3B9CB5',fontSize:'9px' }}>{d.stage}</span>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {contact.notes && (
-            <div>
-              <div className="text-xs font-semibold mb-2" style={{ color:'rgba(248,250,252,0.4)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Notes</div>
-              <div className="text-sm p-3" style={{ backgroundColor:'rgba(27,42,74,0.4)',color:'rgba(248,250,252,0.7)',lineHeight:'1.6' }}>{contact.notes}</div>
-            </div>
-          )}
-
-          {(contact.tags??[]).length>0 && (
-            <div>
-              <div className="text-xs font-semibold mb-2" style={{ color:'rgba(248,250,252,0.4)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>Tags</div>
-              <div className="flex flex-wrap gap-1.5">
-                {(contact.tags??[]).map(t=><span key={t} className="px-2 py-0.5 text-xs" style={{ backgroundColor:'rgba(197,150,58,0.12)',color:'#C5963A',border:'1px solid rgba(197,150,58,0.25)' }}>{t}</span>)}
-              </div>
-            </div>
-          )}
-
-          {/* Skip Trace */}
-          <div className="p-3" style={{ backgroundColor:'rgba(139,92,246,0.08)',border:'1px solid rgba(139,92,246,0.2)' }}>
-            <div className="flex items-center justify-between">
-              <div>
-                <div className="text-xs font-semibold" style={{ color:'#8B5CF6' }}>Skip Trace</div>
-                <div className="text-xs mt-0.5" style={{ color:'rgba(248,250,252,0.4)' }}>Enrich contact with public records data</div>
-              </div>
-              <button className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold"
-                style={{ backgroundColor:'rgba(139,92,246,0.2)',color:'#8B5CF6',border:'1px solid rgba(139,92,246,0.3)' }}
-                onClick={()=>alert('Skip Trace integration: BatchSkipTracing / PropStream API — coming in Phase 4')}>
-                <Zap size={11}/> Run Skip Trace
-              </button>
-            </div>
-          </div>
-        </div>
-      </div>
-    </>
   )
 }
 
 // ─── CSV Import Modal ─────────────────────────────────────────────────────────
-function CsvImportModal({ onClose, onImport }: {
-  onClose: () => void; onImport: (c: Partial<Contact>[]) => Promise<void>
-}) {
-  const [rows, setRows]       = useState<Record<string,string>[]>([])
-  const [headers, setHeaders] = useState<string[]>([])
-  const [importing, setImporting] = useState(false)
-  const [done, setDone]       = useState(false)
-  const fileRef = useRef<HTMLInputElement>(null)
+const CSV_COLS = ['first_name','last_name','company','contact_type','phone','email','city','state','zip_code','status','tags','notes']
+const CSV_ALIASES: Record<string,string[]> = {
+  first_name:['first_name','first name','firstname','fname'],
+  last_name:['last_name','last name','lastname','lname','surname'],
+  company:['company','company name','firm','organization'],
+  contact_type:['contact_type','type','contact type','role'],
+  phone:['phone','phone number','mobile','cell','telephone'],
+  email:['email','email address','e-mail'],
+  city:['city'], state:['state','st'],
+  zip_code:['zip','zip_code','postal','postal code'],
+  status:['status'], tags:['tags','labels'], notes:['notes','comments','memo'],
+}
 
-  const FIELD_MAP: Record<string, keyof Contact> = {
-    first_name:'first_name', firstname:'first_name', 'first name':'first_name',
-    last_name:'last_name', lastname:'last_name', 'last name':'last_name',
-    company:'company', organization:'company',
-    phone:'phone', mobile:'phone', cell:'phone',
-    email:'email', type:'contact_type', contact_type:'contact_type',
-    status:'lead_status', lead_status:'lead_status',
-    source:'lead_source', lead_source:'lead_source',
-    notes:'notes', comments:'notes', tags:'tags',
-  }
+function CSVImportModal({ onClose, onImported, teamId }: { onClose: ()=>void; onImported: ()=>void; teamId: string }) {
+  const [step, setStep] = useState<'upload'|'map'|'preview'|'done'>('upload')
+  const [headers, setHeaders] = useState<string[]>([])
+  const [rows, setRows] = useState<string[][]>([])
+  const [mapping, setMapping] = useState<Record<string,string>>({})
+  const [result, setResult] = useState<{ inserted:number; skipped:number; errors:string[] }|null>(null)
+  const [loading, setLoading] = useState(false)
 
   const handleFile = (file: File) => {
     const reader = new FileReader()
     reader.onload = e => {
-      const parsed = parseCsvFile(e.target?.result as string)
-      if (parsed.length>0) { setHeaders(Object.keys(parsed[0])); setRows(parsed) }
+      const text = e.target?.result as string
+      const lines = text.split('\n').filter(l=>l.trim())
+      if (lines.length < 2) return
+      const hdrs = lines[0].split(',').map(h=>h.trim().replace(/^"|"$/g,''))
+      const rws  = lines.slice(1).map(l=>l.split(',').map(v=>v.trim().replace(/^"|"$/g,'')))
+      setHeaders(hdrs); setRows(rws)
+      const auto: Record<string,string> = {}
+      hdrs.forEach(h => {
+        const lower = h.toLowerCase()
+        for (const [col,alts] of Object.entries(CSV_ALIASES)) {
+          if (alts.includes(lower)) { auto[col]=h; break }
+        }
+      })
+      setMapping(auto); setStep('map')
     }
     reader.readAsText(file)
   }
 
-  const runImport = async () => {
-    setImporting(true)
-    const contacts: Partial<Contact>[] = rows.map(row => {
-      const c: Partial<Contact> = { lead_status:'New', contact_type:'Buyer' }
-      for (const [k,v] of Object.entries(row)) {
-        const f = FIELD_MAP[k.toLowerCase().trim()]
-        if (f && v) (c as Record<string,unknown>)[f] = f==='tags' ? v.split(',').map(t=>t.trim()) : v
-      }
-      return c
-    }).filter(c => c.first_name||c.email||c.phone)
-    await onImport(contacts)
-    setDone(true); setImporting(false)
+  const downloadSample = () => {
+    const csv = 'first_name,last_name,company,contact_type,phone,email,city,state,zip_code,status,tags,notes\nJohn,Smith,Smith Capital LLC,Buyer,(310) 555-0100,jsmith@smithcap.com,Long Beach,CA,90803,Active,buyer;multifamily,Looking for 4-8 unit buildings\nMaria,Garcia,,Seller,(562) 555-0200,mgarcia@email.com,Naples,CA,90803,Active,seller;motivated,Owns 4-plex on 2nd St'
+    const blob = new Blob([csv],{type:'text/csv'})
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a'); a.href=url; a.download='contacts_sample.csv'; a.click()
+    URL.revokeObjectURL(url)
   }
 
+  const doImport = async () => {
+    setLoading(true)
+    let inserted=0, skipped=0; const errors: string[] = []
+    for (const row of rows) {
+      const get = (col: string) => { const h=mapping[col]; if(!h) return ''; const idx=headers.indexOf(h); return idx>=0?(row[idx]||''):'' }
+      const fn = get('first_name')
+      if (!fn) { skipped++; continue }
+      const phone=get('phone'), email=get('email')
+      const tags = get('tags') ? get('tags').split(';').map(t=>t.trim()).filter(Boolean) : []
+      const record = {
+        team_id:teamId, first_name:fn, last_name:get('last_name')||null,
+        company:get('company')||null, contact_type:get('contact_type')||'Other',
+        phone:phone||null, email:email||null,
+        city:get('city')||null, state:get('state')||null, zip_code:get('zip_code')||null,
+        status:get('status')||'Active', tags, notes:get('notes')||null,
+        phones:phone?[{value:phone,type:'Mobile',status:'Primary'}]:[],
+        emails:email?[{value:email,type:'Work',status:'Primary'}]:[],
+        addresses:[],
+      }
+      const { error } = await supabase.from('contacts').insert(record)
+      if (error) { errors.push(`${fn}: ${error.message}`); skipped++ } else inserted++
+    }
+    setResult({ inserted, skipped, errors }); setStep('done'); setLoading(false)
+    if (inserted>0) onImported()
+  }
+
+  const stepKeys = ['upload','map','preview','done']
+  const stepLabels = ['Upload','Map Columns','Preview','Done']
+
   return (
-    <>
-      <div className="fixed inset-0 z-50" style={{ backgroundColor:'rgba(0,0,0,0.7)' }} onClick={onClose}/>
-      <div className="fixed inset-0 z-50 flex items-center justify-center p-6">
-        <div className="w-full max-w-2xl flex flex-col" style={{ backgroundColor:'#1B2A4A',border:'1px solid rgba(197,150,58,0.3)',maxHeight:'80vh' }}>
-          <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor:'rgba(197,150,58,0.2)' }}>
-            <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Import Contacts from CSV</div>
-            <button onClick={onClose} style={{ color:'rgba(248,250,252,0.4)' }}><X size={14}/></button>
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style={{ background:'#0F172A', border:'1px solid rgba(248,250,252,0.12)', borderRadius:8, width:640, maxHeight:'85vh', overflowY:'auto', padding:28 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+          <div style={{ fontSize:16, fontWeight:700, color:'#F8FAFC' }}>Import Contacts from CSV</div>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'rgba(248,250,252,0.4)', cursor:'pointer', fontSize:20 }}>×</button>
+        </div>
+        <div style={{ display:'flex', gap:6, marginBottom:20 }}>
+          {stepLabels.map((s,i) => {
+            const active = stepKeys[i]===step, done = stepKeys.indexOf(step)>i
+            return <div key={s} style={{ flex:1, textAlign:'center', padding:'6px 0', borderRadius:4, fontSize:11, fontWeight:600,
+              background:active?'rgba(197,150,58,0.2)':done?'rgba(34,197,94,0.1)':'rgba(248,250,252,0.05)',
+              color:active?'#C5963A':done?'#22c55e':'rgba(248,250,252,0.3)',
+              border:`1px solid ${active?'rgba(197,150,58,0.4)':done?'rgba(34,197,94,0.3)':'rgba(248,250,252,0.08)'}`
+            }}>{done?'✓ ':''}{s}</div>
+          })}
+        </div>
+
+        {step==='upload' && (
+          <div>
+            <div onDrop={e=>{e.preventDefault();const f=e.dataTransfer.files[0];if(f)handleFile(f)}} onDragOver={e=>e.preventDefault()}
+              style={{ border:'2px dashed rgba(197,150,58,0.3)', borderRadius:8, padding:40, textAlign:'center', cursor:'pointer' }}
+              onClick={()=>document.getElementById('csv-contacts-upload')?.click()}>
+              <Upload size={32} color="rgba(197,150,58,0.5)" style={{ margin:'0 auto 12px' }} />
+              <div style={{ color:'#F8FAFC', fontSize:14, marginBottom:6 }}>Drop CSV here or click to browse</div>
+              <div style={{ color:'rgba(248,250,252,0.4)', fontSize:12 }}>Any CSV with contact data</div>
+              <input id="csv-contacts-upload" type="file" accept=".csv" style={{ display:'none' }} onChange={e=>{const f=e.target.files?.[0];if(f)handleFile(f)}} />
+            </div>
+            <button onClick={downloadSample} style={{ marginTop:12, background:'none', border:'1px solid rgba(248,250,252,0.15)', color:'rgba(248,250,252,0.5)', borderRadius:4, padding:'7px 16px', fontSize:12, cursor:'pointer', display:'flex', alignItems:'center', gap:6 }}>
+              <Download size={13} /> Download Sample CSV
+            </button>
           </div>
-          {done ? (
-            <div className="flex flex-col items-center justify-center py-12 gap-3">
-              <CheckCircle size={40} style={{ color:'#22c55e' }}/>
-              <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>Import Complete!</div>
-              <div className="text-xs" style={{ color:'rgba(248,250,252,0.4)' }}>{rows.length} contacts imported</div>
-              <button onClick={onClose} className="mt-2 px-5 py-2 text-xs font-semibold" style={{ backgroundColor:'#C5963A',color:'#0F172A' }}>Done</button>
-            </div>
-          ) : rows.length===0 ? (
-            <div className="flex flex-col items-center justify-center py-16 mx-5 my-5 cursor-pointer"
-              style={{ border:'2px dashed rgba(197,150,58,0.25)',backgroundColor:'rgba(27,42,74,0.3)' }}
-              onClick={()=>fileRef.current?.click()}>
-              <Upload size={32} style={{ color:'rgba(197,150,58,0.5)' }}/>
-              <div className="mt-3 text-sm" style={{ color:'rgba(248,250,252,0.5)' }}>Drop CSV or click to browse</div>
-              <div className="mt-1 text-xs" style={{ color:'rgba(248,250,252,0.3)' }}>Columns: first_name, last_name, phone, email, company, type, source, tags</div>
-              <input ref={fileRef} type="file" accept=".csv" className="hidden" onChange={e=>e.target.files?.[0]&&handleFile(e.target.files[0])}/>
-            </div>
-          ) : (
-            <>
-              <div className="flex-1 overflow-auto px-5 py-3">
-                <div className="text-xs mb-2" style={{ color:'rgba(248,250,252,0.4)' }}>{rows.length} contacts ready to import</div>
-                <div className="overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead><tr style={{ backgroundColor:'rgba(27,42,74,0.8)' }}>{headers.slice(0,6).map(h=><th key={h} className="px-3 py-2 text-left font-semibold" style={{ color:'#C5963A',fontSize:'9px',textTransform:'uppercase' }}>{h}</th>)}</tr></thead>
-                    <tbody>{rows.slice(0,8).map((r,i)=><tr key={i} style={{ borderBottom:'1px solid rgba(248,250,252,0.04)' }}>{headers.slice(0,6).map(h=><td key={h} className="px-3 py-2" style={{ color:'#F8FAFC' }}>{r[h]||'—'}</td>)}</tr>)}</tbody>
-                  </table>
+        )}
+
+        {step==='map' && (
+          <div>
+            <div style={{ fontSize:12, color:'rgba(248,250,252,0.5)', marginBottom:16 }}>Map your CSV columns. Auto-detected fields are pre-filled.</div>
+            <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:10, marginBottom:20 }}>
+              {CSV_COLS.map(col => (
+                <div key={col}>
+                  <label style={L}>{col.replace(/_/g,' ')}</label>
+                  <select style={{ ...S, cursor:'pointer' }} value={mapping[col]||''} onChange={e=>setMapping(m=>({...m,[col]:e.target.value}))}>
+                    <option value="">— skip —</option>
+                    {headers.map(h=><option key={h} value={h}>{h}</option>)}
+                  </select>
                 </div>
+              ))}
+            </div>
+            <button onClick={()=>setStep('preview')} style={{ width:'100%', background:'rgba(197,150,58,0.2)', border:'1px solid rgba(197,150,58,0.4)', color:'#C5963A', borderRadius:4, padding:'8px 0', fontSize:13, cursor:'pointer', fontWeight:600 }}>
+              Preview ({rows.length} rows) →
+            </button>
+          </div>
+        )}
+
+        {step==='preview' && (
+          <div>
+            <div style={{ fontSize:12, color:'rgba(248,250,252,0.5)', marginBottom:12 }}>First 5 rows after mapping:</div>
+            <div style={{ overflowX:'auto', marginBottom:16 }}>
+              <table style={{ width:'100%', borderCollapse:'collapse', fontSize:11 }}>
+                <thead>
+                  <tr>{['First Name','Last Name','Company','Type','Phone','Email'].map(h=>(
+                    <th key={h} style={{ padding:'6px 8px', textAlign:'left', color:'rgba(248,250,252,0.4)', borderBottom:'1px solid rgba(248,250,252,0.08)' }}>{h}</th>
+                  ))}</tr>
+                </thead>
+                <tbody>
+                  {rows.slice(0,5).map((row,i) => {
+                    const get = (col: string) => { const h=mapping[col]; return h?(row[headers.indexOf(h)]||''):'' }
+                    return (
+                      <tr key={i} style={{ borderBottom:'1px solid rgba(248,250,252,0.05)' }}>
+                        {['first_name','last_name','company','contact_type','phone','email'].map(col=>(
+                          <td key={col} style={{ padding:'6px 8px', color:'#F8FAFC' }}>{get(col)||<span style={{ color:'rgba(248,250,252,0.2)' }}>—</span>}</td>
+                        ))}
+                      </tr>
+                    )
+                  })}
+                </tbody>
+              </table>
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={()=>setStep('map')} style={{ flex:1, background:'rgba(248,250,252,0.05)', border:'1px solid rgba(248,250,252,0.1)', color:'rgba(248,250,252,0.5)', borderRadius:4, padding:'8px 0', fontSize:13, cursor:'pointer' }}>← Back</button>
+              <button onClick={doImport} disabled={loading} style={{ flex:2, background:'rgba(197,150,58,0.2)', border:'1px solid rgba(197,150,58,0.4)', color:'#C5963A', borderRadius:4, padding:'8px 0', fontSize:13, cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+                {loading?<><Loader2 size={14} style={{ animation:'spin 1s linear infinite' }} /> Importing...</>:`Import ${rows.length} Contacts`}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {step==='done' && result && (
+          <div style={{ textAlign:'center', padding:'20px 0' }}>
+            <CheckCircle size={40} color="#22c55e" style={{ margin:'0 auto 12px' }} />
+            <div style={{ fontSize:18, fontWeight:700, color:'#F8FAFC', marginBottom:8 }}>Import Complete</div>
+            <div style={{ fontSize:13, color:'rgba(248,250,252,0.6)', marginBottom:16 }}>{result.inserted} imported · {result.skipped} skipped</div>
+            {result.errors.length>0 && (
+              <div style={{ background:'rgba(239,68,68,0.1)', border:'1px solid rgba(239,68,68,0.2)', borderRadius:6, padding:12, textAlign:'left', marginBottom:16 }}>
+                <div style={{ fontSize:11, color:'#ef4444', fontWeight:600, marginBottom:6 }}>Errors:</div>
+                {result.errors.slice(0,5).map((e,i)=><div key={i} style={{ fontSize:11, color:'rgba(248,250,252,0.5)' }}>{e}</div>)}
               </div>
-              <div className="flex items-center justify-between px-5 py-3 border-t flex-shrink-0" style={{ borderColor:'rgba(248,250,252,0.06)' }}>
-                <button onClick={onClose} className="px-4 py-2 text-xs" style={{ color:'rgba(248,250,252,0.4)',border:'1px solid rgba(248,250,252,0.1)' }}>Cancel</button>
-                <button onClick={runImport} disabled={importing} className="flex items-center gap-1.5 px-5 py-2 text-xs font-semibold" style={{ backgroundColor:'#C5963A',color:'#0F172A' }}>
-                  {importing?<><RefreshCw size={11} className="animate-spin"/> Importing...</>:`Import ${rows.length} Contacts`}
-                </button>
-              </div>
-            </>
-          )}
+            )}
+            <button onClick={onClose} style={{ background:'rgba(197,150,58,0.2)', border:'1px solid rgba(197,150,58,0.4)', color:'#C5963A', borderRadius:4, padding:'8px 24px', fontSize:13, cursor:'pointer', fontWeight:600 }}>Done</button>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// ─── Contact Form Modal ───────────────────────────────────────────────────────
+function ContactFormModal({ contact, onClose, onSaved, teamId, dbProperties }: {
+  contact?: Contact|null; onClose: ()=>void; onSaved: ()=>void; teamId: string; dbProperties: DBProperty[]
+}) {
+  const isEdit = !!contact?.id
+  const [form, setForm] = useState({
+    first_name:contact?.first_name||'', last_name:contact?.last_name||'',
+    company:contact?.company||'', contact_type:contact?.contact_type||'Buyer',
+    city:contact?.city||'', state:contact?.state||'CA', zip_code:contact?.zip_code||'',
+    status:contact?.status||'Active', notes:contact?.notes||'', tags:(contact?.tags||[]).join(', '),
+  })
+  const [phones, setPhones] = useState<PhoneEntry[]>(
+    contact?.phones?.length ? contact.phones : contact?.phone ? [{value:contact.phone,type:'Mobile',status:'Primary'}] : [{value:'',type:'Mobile',status:'Primary'}]
+  )
+  const [emails, setEmails] = useState<EmailEntry[]>(
+    contact?.emails?.length ? contact.emails : contact?.email ? [{value:contact.email,type:'Work',status:'Primary'}] : [{value:'',type:'Work',status:'Primary'}]
+  )
+  const [addresses, setAddresses] = useState<AddressEntry[]>(contact?.addresses||[])
+  const [linkedProps, setLinkedProps] = useState<LinkedProperty[]>([])
+  const [autoSuggestions, setAutoSuggestions] = useState<DBProperty[]>([])
+  const [saving, setSaving] = useState(false)
+  const [tab, setTab] = useState<'basic'|'contact'|'properties'>('basic')
+
+  useEffect(() => {
+    if (!form.last_name && !form.company) return
+    const suggestions = dbProperties.filter(p =>
+      (form.last_name && p.address.toLowerCase().includes(form.last_name.toLowerCase())) ||
+      (form.company && p.address.toLowerCase().includes(form.company.toLowerCase()))
+    ).slice(0,5)
+    setAutoSuggestions(suggestions)
+  }, [form.last_name, form.company, dbProperties])
+
+  const save = async () => {
+    if (!form.first_name.trim()) return
+    setSaving(true)
+    const tags = form.tags.split(',').map(t=>t.trim()).filter(Boolean)
+    const primaryPhone = phones.find(p=>p.value)?.value||null
+    const primaryEmail = emails.find(e=>e.value)?.value||null
+    const record = {
+      team_id:teamId, first_name:form.first_name, last_name:form.last_name||null,
+      company:form.company||null, contact_type:form.contact_type,
+      city:form.city||null, state:form.state||null, zip_code:form.zip_code||null,
+      status:form.status, notes:form.notes||null, tags,
+      phone:primaryPhone, email:primaryEmail,
+      phones:phones.filter(p=>p.value), emails:emails.filter(e=>e.value), addresses:addresses.filter(a=>a.value),
+    }
+    if (isEdit) await supabase.from('contacts').update(record).eq('id',contact!.id)
+    else await supabase.from('contacts').insert(record)
+    setSaving(false); onSaved(); onClose()
+  }
+
+  const tabs = [{key:'basic',label:'Basic Info'},{key:'contact',label:'Phone & Email & Address'},{key:'properties',label:'Linked Properties'}]
+
+  return (
+    <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center' }}>
+      <div style={{ background:'#0F172A', border:'1px solid rgba(248,250,252,0.12)', borderRadius:8, width:660, maxHeight:'90vh', overflowY:'auto', padding:28 }}>
+        <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+          <div style={{ fontSize:16, fontWeight:700, color:'#F8FAFC' }}>{isEdit?'Edit Contact':'New Contact'}</div>
+          <button onClick={onClose} style={{ background:'none', border:'none', color:'rgba(248,250,252,0.4)', cursor:'pointer', fontSize:20 }}>×</button>
+        </div>
+        <div style={{ display:'flex', gap:4, marginBottom:20, borderBottom:'1px solid rgba(248,250,252,0.08)', paddingBottom:0 }}>
+          {tabs.map(t => (
+            <button key={t.key} onClick={()=>setTab(t.key as typeof tab)}
+              style={{ background:'none', border:'none', borderBottom:tab===t.key?'2px solid #C5963A':'2px solid transparent', color:tab===t.key?'#C5963A':'rgba(248,250,252,0.5)', padding:'8px 16px', fontSize:13, fontWeight:600, cursor:'pointer', marginBottom:-1 }}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        {tab==='basic' && (
+          <div style={{ display:'grid', gridTemplateColumns:'1fr 1fr', gap:14 }}>
+            <div><label style={L}>First Name *</label><input style={S} value={form.first_name} onChange={e=>setForm(f=>({...f,first_name:e.target.value}))} placeholder="First name" /></div>
+            <div><label style={L}>Last Name</label><input style={S} value={form.last_name} onChange={e=>setForm(f=>({...f,last_name:e.target.value}))} placeholder="Last name" /></div>
+            <div style={{ gridColumn:'1 / -1' }}><label style={L}>Company / Entity</label><input style={S} value={form.company} onChange={e=>setForm(f=>({...f,company:e.target.value}))} placeholder="Company or LLC name" /></div>
+            <div><label style={L}>Contact Type</label><select style={{ ...S, cursor:'pointer' }} value={form.contact_type} onChange={e=>setForm(f=>({...f,contact_type:e.target.value}))}>{CONTACT_TYPES.map(t=><option key={t}>{t}</option>)}</select></div>
+            <div><label style={L}>Status</label><select style={{ ...S, cursor:'pointer' }} value={form.status} onChange={e=>setForm(f=>({...f,status:e.target.value}))}>{['Active','Inactive','Lead','Do Not Contact'].map(s=><option key={s}>{s}</option>)}</select></div>
+            <div><label style={L}>City</label><input style={S} value={form.city} onChange={e=>setForm(f=>({...f,city:e.target.value}))} placeholder="City" /></div>
+            <div style={{ display:'flex', gap:8 }}>
+              <div style={{ flex:1 }}><label style={L}>State</label><input style={S} value={form.state} onChange={e=>setForm(f=>({...f,state:e.target.value}))} placeholder="CA" /></div>
+              <div style={{ flex:1 }}><label style={L}>ZIP</label><input style={S} value={form.zip_code} onChange={e=>setForm(f=>({...f,zip_code:e.target.value}))} placeholder="90803" /></div>
+            </div>
+            <div style={{ gridColumn:'1 / -1' }}><label style={L}>Tags (comma separated)</label><input style={S} value={form.tags} onChange={e=>setForm(f=>({...f,tags:e.target.value}))} placeholder="buyer, multifamily, 1031" /></div>
+            <div style={{ gridColumn:'1 / -1' }}><label style={L}>Notes</label><textarea style={{ ...S, minHeight:72, resize:'vertical' }} value={form.notes} onChange={e=>setForm(f=>({...f,notes:e.target.value}))} placeholder="Internal notes..." /></div>
+          </div>
+        )}
+
+        {tab==='contact' && (
+          <div style={{ display:'flex', flexDirection:'column', gap:20 }}>
+            <div>
+              <div style={{ fontSize:12, fontWeight:700, color:'#F8FAFC', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}><Phone size={13} color="#C5963A" /> Phone Numbers</div>
+              <PhoneArray phones={phones} onChange={setPhones} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, fontWeight:700, color:'#F8FAFC', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}><Mail size={13} color="#3B9CB5" /> Email Addresses</div>
+              <EmailArray emails={emails} onChange={setEmails} />
+            </div>
+            <div>
+              <div style={{ fontSize:12, fontWeight:700, color:'#F8FAFC', marginBottom:10, display:'flex', alignItems:'center', gap:6 }}><MapPin size={13} color="#8b5cf6" /> Mailing Addresses</div>
+              <AddressArray addresses={addresses} onChange={setAddresses} />
+            </div>
+          </div>
+        )}
+
+        {tab==='properties' && (
+          <div>
+            <div style={{ fontSize:12, color:'rgba(248,250,252,0.5)', marginBottom:16 }}>Link properties to this contact. Search existing database properties or add new ones on-the-fly.</div>
+            <PropertyLinker linked={linkedProps} onChange={setLinkedProps} dbProperties={dbProperties} autoSuggestions={autoSuggestions} />
+          </div>
+        )}
+
+        <div style={{ display:'flex', gap:8, marginTop:24, paddingTop:16, borderTop:'1px solid rgba(248,250,252,0.08)' }}>
+          <button onClick={onClose} style={{ flex:1, background:'rgba(248,250,252,0.05)', border:'1px solid rgba(248,250,252,0.1)', color:'rgba(248,250,252,0.5)', borderRadius:4, padding:'9px 0', fontSize:13, cursor:'pointer' }}>Cancel</button>
+          <button onClick={save} disabled={saving||!form.first_name.trim()} style={{ flex:2, background:'rgba(197,150,58,0.2)', border:'1px solid rgba(197,150,58,0.4)', color:'#C5963A', borderRadius:4, padding:'9px 0', fontSize:13, cursor:'pointer', fontWeight:600, display:'flex', alignItems:'center', justifyContent:'center', gap:8 }}>
+            {saving?<><Loader2 size={14} style={{ animation:'spin 1s linear infinite' }} /> Saving...</>:isEdit?'Save Changes':'Create Contact'}
+          </button>
         </div>
       </div>
-    </>
+    </div>
+  )
+}
+
+// ─── Contact Detail Drawer ────────────────────────────────────────────────────
+function ContactDrawer({ contact, onClose, onEdit, onSkipTrace }: { contact: Contact; onClose: ()=>void; onEdit: ()=>void; onSkipTrace: ()=>void }) {
+  const phones = contact.phones?.length ? contact.phones : contact.phone ? [{value:contact.phone,type:'Mobile',status:'Primary'}] : []
+  const emails = contact.emails?.length ? contact.emails : contact.email ? [{value:contact.email,type:'Work',status:'Primary'}] : []
+  return (
+    <div style={{ position:'fixed', right:0, top:0, bottom:0, width:380, background:'#0F172A', borderLeft:'1px solid rgba(248,250,252,0.1)', zIndex:100, overflowY:'auto', padding:24 }}>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'flex-start', marginBottom:20 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          <div style={{ width:48, height:48, borderRadius:'50%', background:'rgba(197,150,58,0.2)', border:'2px solid rgba(197,150,58,0.4)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:18, fontWeight:700, color:'#C5963A' }}>
+            {contact.first_name[0]}{(contact.last_name||'')[0]||''}
+          </div>
+          <div>
+            <div style={{ fontSize:16, fontWeight:700, color:'#F8FAFC' }}>{contact.first_name} {contact.last_name}</div>
+            {contact.company && <div style={{ fontSize:12, color:'rgba(248,250,252,0.5)' }}>{contact.company}</div>}
+          </div>
+        </div>
+        <button onClick={onClose} style={{ background:'none', border:'none', color:'rgba(248,250,252,0.4)', cursor:'pointer', fontSize:20 }}>×</button>
+      </div>
+      <div style={{ display:'flex', gap:6, marginBottom:20 }}>
+        <TypeBadge type={contact.contact_type} />
+        <StatusBadge status={contact.status} />
+      </div>
+      <div style={{ display:'flex', gap:8, marginBottom:20 }}>
+        <button onClick={onEdit} style={{ flex:1, background:'rgba(197,150,58,0.15)', border:'1px solid rgba(197,150,58,0.3)', color:'#C5963A', borderRadius:4, padding:'7px 0', fontSize:12, cursor:'pointer', fontWeight:600 }}>Edit</button>
+        <button onClick={onSkipTrace} style={{ flex:1, background:'rgba(59,156,181,0.15)', border:'1px solid rgba(59,156,181,0.3)', color:'#3B9CB5', borderRadius:4, padding:'7px 0', fontSize:12, cursor:'pointer', fontWeight:600 }}>Skip Trace</button>
+      </div>
+      {phones.length>0 && (
+        <div style={{ marginBottom:16 }}>
+          <div style={{ ...L, marginBottom:8 }}>Phone Numbers</div>
+          {phones.map((p,i) => (
+            <div key={i} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+              <Phone size={13} color="#C5963A" />
+              <span style={{ fontSize:13, color:'#F8FAFC', flex:1 }}>{p.value}</span>
+              <span style={{ fontSize:10, color:'rgba(248,250,252,0.4)', background:'rgba(248,250,252,0.06)', borderRadius:3, padding:'1px 6px' }}>{p.type}</span>
+              <span style={{ fontSize:10, color:p.status==='Primary'?'#22c55e':p.status==='Bad'?'#ef4444':'rgba(248,250,252,0.4)', background:'rgba(248,250,252,0.06)', borderRadius:3, padding:'1px 6px' }}>{p.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {emails.length>0 && (
+        <div style={{ marginBottom:16 }}>
+          <div style={{ ...L, marginBottom:8 }}>Email Addresses</div>
+          {emails.map((e,i) => (
+            <div key={i} style={{ display:'flex', alignItems:'center', gap:8, marginBottom:6 }}>
+              <Mail size={13} color="#3B9CB5" />
+              <span style={{ fontSize:13, color:'#F8FAFC', flex:1 }}>{e.value}</span>
+              <span style={{ fontSize:10, color:'rgba(248,250,252,0.4)', background:'rgba(248,250,252,0.06)', borderRadius:3, padding:'1px 6px' }}>{e.type}</span>
+              <span style={{ fontSize:10, color:e.status==='Primary'?'#22c55e':e.status==='Bad'?'#ef4444':'rgba(248,250,252,0.4)', background:'rgba(248,250,252,0.06)', borderRadius:3, padding:'1px 6px' }}>{e.status}</span>
+            </div>
+          ))}
+        </div>
+      )}
+      {(contact.city||contact.state) && (
+        <div style={{ marginBottom:16 }}>
+          <div style={{ ...L, marginBottom:8 }}>Location</div>
+          <div style={{ display:'flex', alignItems:'center', gap:8 }}>
+            <MapPin size={13} color="#8b5cf6" />
+            <span style={{ fontSize:13, color:'#F8FAFC' }}>{[contact.city,contact.state,contact.zip_code].filter(Boolean).join(', ')}</span>
+          </div>
+        </div>
+      )}
+      {contact.tags && contact.tags.length>0 && (
+        <div style={{ marginBottom:16 }}>
+          <div style={{ ...L, marginBottom:8 }}>Tags</div>
+          <div style={{ display:'flex', flexWrap:'wrap', gap:6 }}>
+            {contact.tags.map(tag => (
+              <span key={tag} style={{ background:'rgba(27,42,74,0.8)', border:'1px solid rgba(248,250,252,0.12)', borderRadius:3, padding:'2px 8px', fontSize:11, color:'rgba(248,250,252,0.6)' }}>{tag}</span>
+            ))}
+          </div>
+        </div>
+      )}
+      {contact.notes && (
+        <div style={{ marginBottom:16 }}>
+          <div style={{ ...L, marginBottom:8 }}>Notes</div>
+          <div style={{ fontSize:12, color:'rgba(248,250,252,0.6)', lineHeight:1.6, background:'rgba(27,42,74,0.4)', borderRadius:4, padding:10 }}>{contact.notes}</div>
+        </div>
+      )}
+    </div>
   )
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 export default function ContactsPage() {
-  const [contacts, setContacts]       = useState<Contact[]>([])
-  const [loading, setLoading]         = useState(true)
-  const [search, setSearch]           = useState('')
-  const [typeFilter, setTypeFilter]   = useState('All')
-  const [statusFilter, setStatusFilter] = useState('All')
-  const [tagFilter, setTagFilter]     = useState('All')
-  const [selected, setSelected]       = useState<Contact|null>(null)
-  const [editing, setEditing]         = useState<Contact|null>(null)
-  const [showForm, setShowForm]       = useState(false)
-  const [showCsv, setShowCsv]         = useState(false)
-  const [teamId, setTeamId]           = useState<string|null>(null)
-  const [allTags, setAllTags]         = useState<string[]>([])
+  const [contacts, setContacts] = useState<Contact[]>([])
+  const [loading, setLoading] = useState(true)
+  const [search, setSearch] = useState('')
+  const [typeFilter, setTypeFilter] = useState('')
+  const [statusFilter, setStatusFilter] = useState('')
+  const [tagFilter, setTagFilter] = useState('')
+  const [selected, setSelected] = useState<Contact|null>(null)
+  const [editing, setEditing] = useState<Contact|null>(null)
+  const [showForm, setShowForm] = useState(false)
+  const [showCSV, setShowCSV] = useState(false)
+  const [skipTraceContact, setSkipTraceContact] = useState<Contact|null>(null)
+  const [teamId, setTeamId] = useState('')
+  const [dbProperties, setDbProperties] = useState<DBProperty[]>([])
+  const [allTags, setAllTags] = useState<string[]>([])
 
-  useEffect(()=>{ loadContacts() },[])
-
-  const loadContacts = async () => {
+  const load = useCallback(async () => {
     setLoading(true)
-    const { data: td } = await supabase.from('teams').select('id').limit(1).single()
-    setTeamId(td?.id ?? null)
-    const { data } = await supabase.from('contacts').select('*').order('created_at',{ascending:false})
-    const list = (data??[]) as Contact[]
+    const { data: teamData } = await supabase.from('teams').select('id').limit(1).single()
+    const tid = teamData?.id||''
+    setTeamId(tid)
+    const { data } = await supabase.from('contacts').select('*').eq('team_id',tid).order('last_name',{ascending:true})
+    const list = (data||[]) as Contact[]
     setContacts(list)
     const tags = new Set<string>()
-    list.forEach(c=>(c.tags??[]).forEach(t=>tags.add(t)))
+    list.forEach(c=>(c.tags||[]).forEach(t=>tags.add(t)))
     setAllTags(Array.from(tags).sort())
+    const { data: props } = await supabase.from('properties').select('id,address,city,state,zip_code').eq('team_id',tid).order('address')
+    setDbProperties((props||[]) as DBProperty[])
     setLoading(false)
-  }
+  }, [])
 
-  const saveContact = async (data: Partial<Contact>) => {
-    const { data: td } = await supabase.from('teams').select('id').limit(1).single()
-    const primaryPhone = (data.phones??[])[0]?.value ?? data.phone ?? null
-    const primaryEmail = (data.emails??[])[0]?.value ?? data.email ?? null
-    const record = { ...data, team_id:td?.id, phone:primaryPhone, email:primaryEmail, phones:data.phones??[], emails:data.emails??[], addresses:data.addresses??[], tags:data.tags??[] }
-    if (editing?.id) await supabase.from('contacts').update(record).eq('id',editing.id)
-    else await supabase.from('contacts').insert(record)
-    setEditing(null); setShowForm(false)
-    await loadContacts()
-  }
+  useEffect(()=>{ load() },[load])
 
-  const deleteContact = async (id: string) => {
-    if (!confirm('Delete this contact?')) return
-    await supabase.from('contacts').delete().eq('id',id)
-    setSelected(null); await loadContacts()
-  }
-
-  const importContacts = async (newContacts: Partial<Contact>[]) => {
-    const { data: td } = await supabase.from('teams').select('id').limit(1).single()
-    const records = newContacts.map(c=>({ ...c, team_id:td?.id, phones:c.phone?[{value:c.phone,type:'Mobile',status:'Unknown'}]:[], emails:c.email?[{value:c.email,type:'Work',status:'Unknown'}]:[], addresses:[], tags:c.tags??[] }))
-    await supabase.from('contacts').insert(records)
-    await loadContacts()
-  }
+  useEffect(()=>{
+    if (!loading && contacts.length===0 && teamId) {
+      seedContacts(teamId).then(load)
+    }
+  },[loading,contacts.length,teamId,load])
 
   const filtered = contacts.filter(c => {
     const q = search.toLowerCase()
-    const ms = !q || `${c.first_name} ${c.last_name}`.toLowerCase().includes(q) || (c.company??'').toLowerCase().includes(q) || (c.phone??'').includes(q) || (c.email??'').toLowerCase().includes(q)
-    return ms && (typeFilter==='All'||c.contact_type===typeFilter) && (statusFilter==='All'||c.lead_status===statusFilter) && (tagFilter==='All'||(c.tags??[]).includes(tagFilter))
+    const matchSearch = !q || `${c.first_name} ${c.last_name} ${c.company||''} ${getPhone(c)} ${getEmail(c)}`.toLowerCase().includes(q)
+    const matchType   = !typeFilter   || c.contact_type===typeFilter
+    const matchStatus = !statusFilter || c.status===statusFilter
+    const matchTag    = !tagFilter    || (c.tags||[]).includes(tagFilter)
+    return matchSearch && matchType && matchStatus && matchTag
   })
 
-  const getPhone = (c: Contact) => (c.phones??[])[0]?.value ?? c.phone ?? ''
-  const getEmail = (c: Contact) => (c.emails??[])[0]?.value ?? c.email ?? ''
-
   return (
-    <div className="flex flex-col h-full" style={{ backgroundColor:'#0F172A' }}>
+    <div style={{ padding:24, maxWidth:1400, margin:'0 auto' }}>
       {/* Header */}
-      <div className="flex items-center justify-between px-6 py-4 border-b flex-shrink-0" style={{ borderColor:'rgba(197,150,58,0.15)' }}>
-        <div>
-          <h1 className="text-base font-semibold" style={{ color:'#F8FAFC' }}>Contacts</h1>
-          <p className="text-xs mt-0.5" style={{ color:'rgba(248,250,252,0.4)' }}>{contacts.length} total · {filtered.length} shown</p>
+      <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:20 }}>
+        <div style={{ display:'flex', alignItems:'center', gap:12 }}>
+          <Users size={22} color="#C5963A" />
+          <div>
+            <div style={{ fontSize:20, fontWeight:800, color:'#F8FAFC' }}>Contact Manager</div>
+            <div style={{ fontSize:12, color:'rgba(248,250,252,0.4)' }}>{contacts.length} contacts</div>
+          </div>
         </div>
-        <div className="flex items-center gap-2">
-          <button onClick={()=>setShowCsv(true)} className="flex items-center gap-1.5 px-3 py-2 text-xs font-medium"
-            style={{ color:'rgba(248,250,252,0.6)',border:'1px solid rgba(248,250,252,0.12)',backgroundColor:'rgba(248,250,252,0.04)' }}>
-            <Upload size={12}/> Import CSV
+        <div style={{ display:'flex', gap:8 }}>
+          <button onClick={()=>setShowCSV(true)} style={{ display:'flex', alignItems:'center', gap:6, background:'rgba(248,250,252,0.06)', border:'1px solid rgba(248,250,252,0.12)', color:'rgba(248,250,252,0.7)', borderRadius:4, padding:'7px 14px', fontSize:12, cursor:'pointer', fontWeight:600 }}>
+            <Upload size={13} /> Import CSV
           </button>
-          <button onClick={()=>{setEditing(null);setShowForm(true)}} className="flex items-center gap-1.5 px-4 py-2 text-xs font-semibold" style={{ backgroundColor:'#C5963A',color:'#0F172A' }}>
-            <Plus size={12}/> New Contact
+          <button onClick={()=>{ setEditing(null); setShowForm(true) }} style={{ display:'flex', alignItems:'center', gap:6, background:'rgba(197,150,58,0.2)', border:'1px solid rgba(197,150,58,0.4)', color:'#C5963A', borderRadius:4, padding:'7px 14px', fontSize:12, cursor:'pointer', fontWeight:600 }}>
+            <Plus size={13} /> New Contact
           </button>
         </div>
       </div>
 
       {/* Filters */}
-      <div className="flex items-center gap-3 px-6 py-3 border-b flex-shrink-0" style={{ borderColor:'rgba(248,250,252,0.06)' }}>
-        <div className="relative flex-1 max-w-xs">
-          <Search size={12} className="absolute left-2.5 top-2.5" style={{ color:'rgba(248,250,252,0.3)' }}/>
-          <input className="w-full pl-8 pr-3 py-2 text-xs" value={search} onChange={e=>setSearch(e.target.value)} placeholder="Search name, company, phone, email..." />
+      <div style={{ display:'flex', gap:10, marginBottom:16, flexWrap:'wrap' }}>
+        <div style={{ position:'relative', flex:2, minWidth:200 }}>
+          <Search size={13} style={{ position:'absolute', left:10, top:'50%', transform:'translateY(-50%)', color:'rgba(248,250,252,0.3)' }} />
+          <input style={{ ...S, paddingLeft:32 }} placeholder="Search contacts..." value={search} onChange={e=>setSearch(e.target.value)} />
         </div>
-        <select className="text-xs px-2 py-2 w-28" value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
-          <option value="All">All Types</option>
-          {CONTACT_TYPES.map(t=><option key={t} value={t}>{t}</option>)}
+        <select style={{ ...S, flex:1, minWidth:130, cursor:'pointer' }} value={typeFilter} onChange={e=>setTypeFilter(e.target.value)}>
+          <option value="">All Types</option>
+          {CONTACT_TYPES.map(t=><option key={t}>{t}</option>)}
         </select>
-        <select className="text-xs px-2 py-2 w-28" value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
-          <option value="All">All Status</option>
-          {LEAD_STATUSES.map(s=><option key={s} value={s}>{s}</option>)}
+        <select style={{ ...S, flex:1, minWidth:130, cursor:'pointer' }} value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}>
+          <option value="">All Statuses</option>
+          {['Active','Inactive','Lead','Do Not Contact'].map(s=><option key={s}>{s}</option>)}
         </select>
-        {allTags.length>0 && (
-          <select className="text-xs px-2 py-2 w-28" value={tagFilter} onChange={e=>setTagFilter(e.target.value)}>
-            <option value="All">All Tags</option>
-            {allTags.map(t=><option key={t} value={t}>{t}</option>)}
-          </select>
-        )}
+        <select style={{ ...S, flex:1, minWidth:130, cursor:'pointer' }} value={tagFilter} onChange={e=>setTagFilter(e.target.value)}>
+          <option value="">All Tags</option>
+          {allTags.map(t=><option key={t}>{t}</option>)}
+        </select>
       </div>
 
       {/* Table */}
-      <div className="flex-1 overflow-y-auto">
-        {loading ? (
-          <div className="flex items-center justify-center h-32 gap-2" style={{ color:'rgba(248,250,252,0.3)' }}>
-            <RefreshCw size={16} className="animate-spin"/> Loading contacts...
-          </div>
-        ) : filtered.length===0 ? (
-          <div className="flex flex-col items-center justify-center h-32 gap-2">
-            <Users size={24} style={{ color:'rgba(248,250,252,0.15)' }}/>
-            <div className="text-xs" style={{ color:'rgba(248,250,252,0.3)' }}>No contacts found</div>
-          </div>
-        ) : (
-          <table className="w-full text-xs border-collapse">
-            <thead className="sticky top-0" style={{ backgroundColor:'#0F172A',zIndex:1 }}>
-              <tr style={{ borderBottom:'1px solid rgba(197,150,58,0.15)' }}>
-                {['Name','Type','Status','Phone','Email','Tags','Source',''].map(h=>(
-                  <th key={h} className="px-4 py-2.5 text-left font-semibold" style={{ color:'rgba(248,250,252,0.35)',fontSize:'9px',textTransform:'uppercase',letterSpacing:'0.08em' }}>{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody>
-              {filtered.map(c=>(
-                <tr key={c.id} className="cursor-pointer transition-colors" style={{ borderBottom:'1px solid rgba(248,250,252,0.04)' }}
-                  onClick={()=>setSelected(c)}
-                  onMouseEnter={e=>(e.currentTarget.style.backgroundColor='rgba(197,150,58,0.04)')}
-                  onMouseLeave={e=>(e.currentTarget.style.backgroundColor='transparent')}>
-                  <td className="px-4 py-3">
-                    <div className="flex items-center gap-2.5">
-                      <div className="w-7 h-7 flex items-center justify-center text-xs font-bold flex-shrink-0" style={{ backgroundColor:TYPE_COLORS[c.contact_type]??'#64748B',color:'#0F172A' }}>
-                        {c.first_name?.[0]}{c.last_name?.[0]}
-                      </div>
-                      <div>
-                        <div className="font-medium" style={{ color:'#F8FAFC' }}>{c.first_name} {c.last_name}</div>
-                        {c.company && <div style={{ color:'rgba(248,250,252,0.4)' }}>{c.company}</div>}
-                      </div>
-                    </div>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="px-2 py-0.5 text-xs" style={{ backgroundColor:`${TYPE_COLORS[c.contact_type]??'#64748B'}22`,color:TYPE_COLORS[c.contact_type]??'#64748B' }}>{c.contact_type}</span>
-                  </td>
-                  <td className="px-4 py-3">
-                    <span className="px-2 py-0.5 text-xs" style={{ backgroundColor:`${STATUS_COLORS[c.lead_status]??'#64748B'}22`,color:STATUS_COLORS[c.lead_status]??'#64748B' }}>{c.lead_status}</span>
-                  </td>
-                  <td className="px-4 py-3" style={{ color:'rgba(248,250,252,0.6)' }}>{getPhone(c)||'—'}</td>
-                  <td className="px-4 py-3" style={{ color:'rgba(248,250,252,0.6)' }}><span className="truncate max-w-[160px] block">{getEmail(c)||'—'}</span></td>
-                  <td className="px-4 py-3">
-                    <div className="flex flex-wrap gap-1">
-                      {(c.tags??[]).slice(0,2).map(t=><span key={t} className="px-1.5 py-0.5 text-xs" style={{ backgroundColor:'rgba(197,150,58,0.1)',color:'#C5963A',fontSize:'9px' }}>{t}</span>)}
-                      {(c.tags??[]).length>2 && <span style={{ color:'rgba(248,250,252,0.3)',fontSize:'9px' }}>+{(c.tags??[]).length-2}</span>}
-                    </div>
-                  </td>
-                  <td className="px-4 py-3" style={{ color:'rgba(248,250,252,0.35)' }}>{c.lead_source??'—'}</td>
-                  <td className="px-4 py-3">
-                    <button onClick={e=>{e.stopPropagation();setEditing(c);setShowForm(true)}} className="p-1" style={{ color:'rgba(248,250,252,0.25)' }}><Edit3 size={12}/></button>
-                  </td>
-                </tr>
+      <div style={{ background:'#1B2A4A', border:'1px solid rgba(248,250,252,0.08)', borderRadius:8, overflow:'hidden' }}>
+        <table style={{ width:'100%', borderCollapse:'collapse' }}>
+          <thead>
+            <tr style={{ background:'rgba(15,23,42,0.8)' }}>
+              {['Contact','Type','Phone','Email','Location','Tags','Status'].map(h=>(
+                <th key={h} style={{ padding:'10px 14px', textAlign:'left', ...L, fontWeight:700 }}>{h}</th>
               ))}
-            </tbody>
-          </table>
-        )}
+            </tr>
+          </thead>
+          <tbody>
+            {loading ? (
+              <tr><td colSpan={7} style={{ padding:40, textAlign:'center', color:'rgba(248,250,252,0.3)' }}>
+                <Loader2 size={20} style={{ animation:'spin 1s linear infinite', margin:'0 auto' }} />
+              </td></tr>
+            ) : filtered.length===0 ? (
+              <tr><td colSpan={7} style={{ padding:40, textAlign:'center', color:'rgba(248,250,252,0.3)', fontSize:13 }}>No contacts found</td></tr>
+            ) : filtered.map(c => (
+              <tr key={c.id} onClick={()=>setSelected(c)}
+                style={{ borderTop:'1px solid rgba(248,250,252,0.05)', cursor:'pointer', transition:'background 0.12s' }}
+                onMouseEnter={e=>(e.currentTarget.style.background='rgba(248,250,252,0.03)')}
+                onMouseLeave={e=>(e.currentTarget.style.background='transparent')}>
+                <td style={{ padding:'10px 14px' }}>
+                  <div style={{ display:'flex', alignItems:'center', gap:10 }}>
+                    <div style={{ width:32, height:32, borderRadius:'50%', background:'rgba(197,150,58,0.15)', border:'1px solid rgba(197,150,58,0.3)', display:'flex', alignItems:'center', justifyContent:'center', fontSize:12, fontWeight:700, color:'#C5963A', flexShrink:0 }}>
+                      {c.first_name[0]}{(c.last_name||'')[0]||''}
+                    </div>
+                    <div>
+                      <div style={{ fontSize:13, fontWeight:600, color:'#F8FAFC' }}>{c.first_name} {c.last_name}</div>
+                      {c.company && <div style={{ fontSize:11, color:'rgba(248,250,252,0.4)' }}>{c.company}</div>}
+                    </div>
+                  </div>
+                </td>
+                <td style={{ padding:'10px 14px' }}><TypeBadge type={c.contact_type} /></td>
+                <td style={{ padding:'10px 14px', fontSize:12, color:'rgba(248,250,252,0.7)' }}>{getPhone(c)||<span style={{ color:'rgba(248,250,252,0.2)' }}>—</span>}</td>
+                <td style={{ padding:'10px 14px', fontSize:12, color:'rgba(248,250,252,0.7)' }}>{getEmail(c)||<span style={{ color:'rgba(248,250,252,0.2)' }}>—</span>}</td>
+                <td style={{ padding:'10px 14px', fontSize:12, color:'rgba(248,250,252,0.5)' }}>{[c.city,c.state].filter(Boolean).join(', ')||<span style={{ color:'rgba(248,250,252,0.2)' }}>—</span>}</td>
+                <td style={{ padding:'10px 14px' }}>
+                  <div style={{ display:'flex', flexWrap:'wrap', gap:4 }}>
+                    {(c.tags||[]).slice(0,3).map(tag=>(
+                      <span key={tag} style={{ background:'rgba(27,42,74,0.8)', border:'1px solid rgba(248,250,252,0.1)', borderRadius:3, padding:'1px 6px', fontSize:10, color:'rgba(248,250,252,0.5)' }}>{tag}</span>
+                    ))}
+                    {(c.tags||[]).length>3 && <span style={{ fontSize:10, color:'rgba(248,250,252,0.3)' }}>+{(c.tags||[]).length-3}</span>}
+                  </div>
+                </td>
+                <td style={{ padding:'10px 14px' }}><StatusBadge status={c.status} /></td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
 
-      {/* New/Edit Form */}
-      {showForm && (
-        <>
-          <div className="fixed inset-0 z-30" style={{ backgroundColor:'rgba(0,0,0,0.5)' }} onClick={()=>{setShowForm(false);setEditing(null)}}/>
-          <div className="fixed right-0 top-0 h-full z-40 flex flex-col" style={{ width:'520px',backgroundColor:'#1B2A4A',borderLeft:'1px solid rgba(197,150,58,0.25)' }}>
-            <div className="flex items-center justify-between px-5 py-4 border-b flex-shrink-0" style={{ borderColor:'rgba(197,150,58,0.2)' }}>
-              <div className="text-sm font-semibold" style={{ color:'#F8FAFC' }}>{editing?`Edit: ${editing.first_name} ${editing.last_name}`:'New Contact'}</div>
-              <button onClick={()=>{setShowForm(false);setEditing(null)}} style={{ color:'rgba(248,250,252,0.4)' }}><X size={14}/></button>
+      {/* Detail Drawer */}
+      {selected && (
+        <ContactDrawer contact={selected} onClose={()=>setSelected(null)}
+          onEdit={()=>{ setEditing(selected); setShowForm(true); setSelected(null) }}
+          onSkipTrace={()=>{ setSkipTraceContact(selected); setSelected(null) }} />
+      )}
+
+      {/* Skip Trace Modal */}
+      {skipTraceContact && (
+        <div style={{ position:'fixed', inset:0, background:'rgba(0,0,0,0.7)', zIndex:200, display:'flex', alignItems:'center', justifyContent:'center' }}>
+          <div style={{ background:'#0F172A', border:'1px solid rgba(248,250,252,0.12)', borderRadius:8, width:440, padding:28 }}>
+            <div style={{ display:'flex', justifyContent:'space-between', alignItems:'center', marginBottom:16 }}>
+              <div style={{ fontSize:15, fontWeight:700, color:'#F8FAFC' }}>Skip Trace</div>
+              <button onClick={()=>setSkipTraceContact(null)} style={{ background:'none', border:'none', color:'rgba(248,250,252,0.4)', cursor:'pointer', fontSize:20 }}>×</button>
             </div>
-            <div className="flex-1 overflow-hidden">
-              <ContactForm initial={editing??undefined} onSave={saveContact} onCancel={()=>{setShowForm(false);setEditing(null)}}/>
+            <div style={{ background:'rgba(59,156,181,0.1)', border:'1px solid rgba(59,156,181,0.2)', borderRadius:6, padding:16, marginBottom:16 }}>
+              <div style={{ fontSize:13, color:'#F8FAFC', fontWeight:600, marginBottom:4 }}>{skipTraceContact.first_name} {skipTraceContact.last_name}</div>
+              {skipTraceContact.company && <div style={{ fontSize:12, color:'rgba(248,250,252,0.5)' }}>{skipTraceContact.company}</div>}
+            </div>
+            <div style={{ fontSize:12, color:'rgba(248,250,252,0.5)', marginBottom:20, lineHeight:1.6 }}>
+              Skip tracing will search public records and data providers to find current contact information. Results will be added to this contact's profile.
+            </div>
+            <div style={{ display:'flex', gap:8 }}>
+              <button onClick={()=>setSkipTraceContact(null)} style={{ flex:1, background:'rgba(248,250,252,0.05)', border:'1px solid rgba(248,250,252,0.1)', color:'rgba(248,250,252,0.5)', borderRadius:4, padding:'8px 0', fontSize:13, cursor:'pointer' }}>Cancel</button>
+              <button onClick={()=>{ alert('Connect your BatchSkipTracing or PropStream API key in Settings to enable skip tracing.'); setSkipTraceContact(null) }}
+                style={{ flex:2, background:'rgba(59,156,181,0.2)', border:'1px solid rgba(59,156,181,0.4)', color:'#3B9CB5', borderRadius:4, padding:'8px 0', fontSize:13, cursor:'pointer', fontWeight:600 }}>
+                Run Skip Trace
+              </button>
             </div>
           </div>
-        </>
+        </div>
       )}
 
-      {/* Detail Drawer */}
-      {selected && !showForm && (
-        <ContactDrawer contact={selected} onClose={()=>setSelected(null)}
-          onEdit={()=>{setEditing(selected);setSelected(null);setShowForm(true)}}
-          onDelete={()=>deleteContact(selected.id)}/>
+      {/* Contact Form Modal */}
+      {showForm && (
+        <ContactFormModal contact={editing} onClose={()=>setShowForm(false)} onSaved={load} teamId={teamId} dbProperties={dbProperties} />
       )}
 
-      {/* CSV Import */}
-      {showCsv && <CsvImportModal onClose={()=>setShowCsv(false)} onImport={importContacts}/>}
+      {/* CSV Import Modal */}
+      {showCSV && (
+        <CSVImportModal onClose={()=>setShowCSV(false)} onImported={load} teamId={teamId} />
+      )}
     </div>
   )
+}
+
+// ─── Seed ─────────────────────────────────────────────────────────────────────
+async function seedContacts(teamId: string) {
+  const contacts = [
+    { first_name:'Michael', last_name:'Chen', company:'Chen Capital Partners LLC', contact_type:'Buyer', city:'Los Angeles', state:'CA', zip_code:'90025', status:'Active', tags:['buyer','multifamily','1031'], phone:'(310) 555-0101', email:'mchen@chencapital.com', phones:[{value:'(310) 555-0101',type:'Mobile',status:'Primary'}], emails:[{value:'mchen@chencapital.com',type:'Work',status:'Primary'}], addresses:[], notes:'Looking for 4-8 unit buildings in Long Beach, 1031 exchange buyer' },
+    { first_name:'Jennifer', last_name:'Park', company:'Park Ventures Trust', contact_type:'Buyer', city:'Long Beach', state:'CA', zip_code:'90803', status:'Active', tags:['buyer','trust-buyer','naples'], phone:'(562) 555-0202', email:'jpark@parkventures.com', phones:[{value:'(562) 555-0202',type:'Mobile',status:'Primary'}], emails:[{value:'jpark@parkventures.com',type:'Work',status:'Primary'}], addresses:[], notes:'Prefers Naples Island and Belmont Shore' },
+    { first_name:'Robert', last_name:'Martinez', company:'SoCal Holdings Corp', contact_type:'Seller', city:'Anaheim', state:'CA', zip_code:'92801', status:'Active', tags:['seller','motivated'], phone:'(714) 555-0303', email:'rmartinez@socalholdings.com', phones:[{value:'(714) 555-0303',type:'Mobile',status:'Primary'}], emails:[{value:'rmartinez@socalholdings.com',type:'Work',status:'Primary'}], addresses:[], notes:'Owns 3 properties in Long Beach, considering selling' },
+    { first_name:'David', last_name:'Kim', company:null, contact_type:'Buyer', city:'Pasadena', state:'CA', zip_code:'91101', status:'Active', tags:['buyer','1031','multifamily'], phone:'(626) 555-0404', email:'dkim@gmail.com', phones:[{value:'(626) 555-0404',type:'Mobile',status:'Primary'}], emails:[{value:'dkim@gmail.com',type:'Personal',status:'Primary'}], addresses:[], notes:'1031 exchange deadline approaching, needs to close by Q2' },
+    { first_name:'Sarah', last_name:'Thompson', company:'Thompson Realty Group', contact_type:'Broker', city:'Long Beach', state:'CA', zip_code:'90802', status:'Active', tags:['broker','co-op'], phone:'(562) 555-0505', email:'sthompson@thompsonrealty.com', phones:[{value:'(562) 555-0505',type:'Work',status:'Primary'}], emails:[{value:'sthompson@thompsonrealty.com',type:'Work',status:'Primary'}], addresses:[], notes:'Active co-op broker, good referral source' },
+  ]
+  for (const c of contacts) {
+    await supabase.from('contacts').insert({ ...c, team_id:teamId })
+  }
 }
