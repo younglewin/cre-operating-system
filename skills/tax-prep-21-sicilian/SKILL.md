@@ -29,10 +29,12 @@ Inspect the provided documents to identify the tax year, then apply the matching
 * **Ownership**: 50/50 Tenants in Common (TIC). 50% Shane & Jessica Young | 50% Greg & Arlynne Schwartz.
 * **Accounting**: Cash Basis.
 * **Capital Contribution Rule**: Capital contributions do NOT alter the 50/50 tax split. One partner may fund more capital, but all Schedule E income and expenses remain strictly 50/50.
+* **Real Estate Professional Status (REPS)**: Shane Young qualifies as a designated Real Estate Professional. The Schwartz partners are strictly passive investors. Prominently flag this in CPA Notes so the tax preparer correctly categorizes the Youngs' losses as **non-passive** (not subject to passive activity loss limitations) and the Schwartzs' losses as **passive**.
+* **OBBB Depreciation Rule**: Per OBBB regulations, any property, components, or capitalized improvements placed in service after January 19, 2025, must be designated for **100% bonus depreciation**. Calculate cost segregation/depreciation schedules accordingly for eligible 5-year and 15-year property.
 
 ### Required Excel Tab Structure
 
-1. **Cover Page & CPA Notes** — Detail the 50/50 TIC structure and flag any unconfirmed items.
+1. **Cover Page & CPA Notes** — Detail the 50/50 TIC structure, REPS designation for Shane Young, OBBB bonus depreciation methodology, and flag any unconfirmed items.
 2. **Tax Forms Summary** — Consolidated 1098/1099 data.
 3. **Sch E - Young** — 50% share of Schedule E income and deductions.
 4. **Sch E - Schwartz** — 50% share of Schedule E income and deductions.
